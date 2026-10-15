@@ -1558,7 +1558,8 @@ var STATUS_TONE = {
   '지연':'critical','불합격':'critical','중대':'critical',
   '경미':'good','중':'warning',
   '적합':'good','부적합':'critical','교정예정':'warning','폐기':'neutral',
-  '보류':'warning','전산등록':'accent','불필요':'neutral'
+  '보류':'warning','전산등록':'accent','불필요':'neutral',
+  '신청중':'warning','고객승인대기':'accent','승인완료':'good','반려':'critical'
 };
 function tone(v){ return STATUS_TONE[v] || 'neutral'; }
 function badge(v){ if(!v) return '<span class="cell-muted">-</span>'; return '<span class="badge b-'+tone(v)+'">'+v+'</span>'; }
@@ -2244,8 +2245,11 @@ function renderDashboard(){
   var gaugeIssues = d.gauges.filter(function(g){return g.status==='부적합'||g.status==='교정예정';}).length;
   var upcomingSamples = d.samples.filter(function(s){ var n=daysUntil(s.dueDate); return s.status!=='납품완료' && n!==null && n<=10; }).length;
   var active8D = d.d8reports.filter(function(r){return r.status!=='완료';}).length;
-  var supplierMail = MODULES.suppliers.mail;
-  var overdueAudits = d.suppliers.filter(supplierMail.overdueCheck).length;
+  // 공급업체 Audit 현황은 이제 공급업체 관리 탭의 planDate/actualDate가 아니라,
+  // "감사 일정/이력" 메뉴에 등록된 2자심사(공급업체) 항목의 일자/상태를 기준으로 판단합니다.
+  var supplierAudits = d.audits.filter(function(r){ return r.type==='2자심사(공급업체)'; });
+  var overdueAudits = supplierAudits.filter(function(r){ return r.date && r.status!=='완료' && daysUntil(r.date)<0; }).length;
+  var openIsir4m = d.isir4m.filter(function(r){return r.status!=='승인완료' && r.status!=='반려';}).length;
 
   var html = '';
   html += '<h1 class="page-title">대시보드</h1><p class="page-sub">STKR 품질 현황을 한눈에 확인합니다 · 기준일 '+todayISO()+'</p>';
@@ -2253,11 +2257,12 @@ function renderDashboard(){
   html += '<div class="section-note">'+ICONS.info+'<div>공정별 생산수량·불량유형·PPM은 <b>공정별 불량 현황</b> 메뉴에서 엑셀 파일을 업로드해 확인하세요.</div></div>';
 
   html += '<div class="kpi-row">';
-  html += kpiCard('점검필요 게이지', gaugeIssues+'건', '전체 '+d.gauges.length+'건 중 (부적합·교정예정)', gaugeIssues>0?'critical':'good');
-  html += kpiCard('미종결 클레임', openClaims+'건', '전체 '+d.claims.length+'건 중', openClaims>0?'critical':'good');
-  html += kpiCard('임박 샘플납기(10일 이내)', upcomingSamples+'건', '전체 '+d.samples.length+'건 중', upcomingSamples>0?'warning':'good');
-  html += kpiCard('진행중 8D 보고서', active8D+'건', '전체 '+d.d8reports.length+'건 중', 'serious');
-  html += kpiCard('공급업체 Audit 계획일 초과', overdueAudits+'건', '전체 '+d.suppliers.length+'개사 중', overdueAudits>0?'critical':'good');
+  html += kpiCard('점검필요 게이지', gaugeIssues+'건', '전체 '+d.gauges.length+'건 중 (부적합·교정예정)', gaugeIssues>0?'critical':'good', 'gauges');
+  html += kpiCard('미종결 클레임', openClaims+'건', '전체 '+d.claims.length+'건 중', openClaims>0?'critical':'good', 'claims');
+  html += kpiCard('임박 샘플납기(10일 이내)', upcomingSamples+'건', '전체 '+d.samples.length+'건 중', upcomingSamples>0?'warning':'good', 'samples');
+  html += kpiCard('진행중 8D 보고서', active8D+'건', '전체 '+d.d8reports.length+'건 중', 'serious', 'd8reports');
+  html += kpiCard('공급업체 Audit 계획일 초과', overdueAudits+'건', '감사 일정/이력의 2자심사(공급업체) '+supplierAudits.length+'건 중', overdueAudits>0?'critical':'good', 'audits');
+  html += kpiCard('진행중 ISIR/4M 변경', openIsir4m+'건', '전체 '+d.isir4m.length+'건 중', openIsir4m>0?'warning':'good', 'isir4m');
   html += '</div>';
 
   html += '<div class="panel-row">';
@@ -2268,7 +2273,7 @@ function renderDashboard(){
     var n = d.gauges.filter(function(g){return g.status===s;}).length;
     var t = tone(s);
     var color = 'var(--'+(t==='neutral'?'muted':t)+')';
-    html += '<div class="srow"><span class="dot" style="background:'+color+';"></span><span class="name">'+s+'</span><span class="count tnum">'+n+'</span></div>';
+    html += '<div class="srow" data-dash-route="gauges" data-dash-status="'+s+'" style="cursor:pointer;"><span class="dot" style="background:'+color+';"></span><span class="name">'+s+'</span><span class="count tnum">'+n+'</span></div>';
   });
   if(!d.gauges.length){ html += '<p class="cell-muted" style="font-size:12px;">데이터가 없습니다.</p>'; }
   html += '</div></div>';
@@ -2280,7 +2285,7 @@ function renderDashboard(){
     var n = d.claims.filter(function(c){return c.status===s;}).length;
     var t = tone(s);
     var color = 'var(--'+(t==='neutral'?'muted':t)+')';
-    html += '<div class="srow"><span class="dot" style="background:'+color+';"></span><span class="name">'+s+'</span><span class="count tnum">'+n+'</span></div>';
+    html += '<div class="srow" data-dash-route="claims" data-dash-status="'+s+'" style="cursor:pointer;"><span class="dot" style="background:'+color+';"></span><span class="name">'+s+'</span><span class="count tnum">'+n+'</span></div>';
   });
   html += '</div></div>';
 
@@ -2290,7 +2295,7 @@ function renderDashboard(){
     var n = d.d8reports.filter(function(r){return r.scope===sc;}).length;
     var open = d.d8reports.filter(function(r){return r.scope===sc && r.status!=='완료';}).length;
     var color = sc==='사내' ? 'var(--accent)' : 'var(--muted)';
-    html += '<div class="srow"><span class="dot" style="background:'+color+';"></span><span class="name">'+sc+' (진행중 '+open+')</span><span class="count tnum">'+n+'</span></div>';
+    html += '<div class="srow" data-dash-route="d8reports" data-dash-extra="'+sc+'" style="cursor:pointer;"><span class="dot" style="background:'+color+';"></span><span class="name">'+sc+' (진행중 '+open+')</span><span class="count tnum">'+n+'</span></div>';
   });
   if(!d.d8reports.length){ html += '<p class="cell-muted" style="font-size:12px;">데이터가 없습니다.</p>'; }
   html += '</div></div>';
@@ -2302,38 +2307,67 @@ function renderDashboard(){
     var n = d.reliability.filter(function(r){return r.status===s;}).length;
     var t = tone(s);
     var color = 'var(--'+(t==='neutral'?'muted':t)+')';
-    html += '<div class="srow"><span class="dot" style="background:'+color+';"></span><span class="name">'+s+'</span><span class="count tnum">'+n+'</span></div>';
+    html += '<div class="srow" data-dash-route="reliability" data-dash-status="'+s+'" style="cursor:pointer;"><span class="dot" style="background:'+color+';"></span><span class="name">'+s+'</span><span class="count tnum">'+n+'</span></div>';
   });
   if(!d.reliability.length){ html += '<p class="cell-muted" style="font-size:12px;">데이터가 없습니다.</p>'; }
+  html += '</div></div>';
+
+  // panel 5: ISIR/4M 변경 상태별 현황
+  var isir4mStatuses = ['신청중','고객승인대기','승인완료','반려'];
+  html += '<div class="panel"><h3>ISIR/4M 변경 상태별 현황</h3><p class="panel-sub">전체 '+d.isir4m.length+'건</p><div class="status-list">';
+  isir4mStatuses.forEach(function(s){
+    var n = d.isir4m.filter(function(r){return r.status===s;}).length;
+    var t = tone(s);
+    var color = 'var(--'+(t==='neutral'?'muted':t)+')';
+    html += '<div class="srow" data-dash-route="isir4m" data-dash-status="'+s+'" style="cursor:pointer;"><span class="dot" style="background:'+color+';"></span><span class="name">'+s+'</span><span class="count tnum">'+n+'</span></div>';
+  });
+  if(!d.isir4m.length){ html += '<p class="cell-muted" style="font-size:12px;">데이터가 없습니다.</p>'; }
   html += '</div></div>';
   html += '</div>';
 
   // upcoming table
-  html += '<div class="panel" style="margin-bottom:20px;"><h3>임박 일정 (샘플납기 · 8D · 감사 · 게이지 · 신뢰성)</h3><p class="panel-sub">가까운 순으로 정렬</p>';
+  html += '<div class="panel" style="margin-bottom:20px;"><h3>임박 일정 (샘플납기 · 8D · 감사 · 게이지 · 신뢰성 · ISIR/4M)</h3><p class="panel-sub">가까운 순으로 정렬</p>';
   var upcoming = [];
-  d.samples.forEach(function(r){ if(r.status!=='납품완료') upcoming.push({label:'샘플납기',name:r.part,date:r.dueDate,status:r.status}); });
-  d.d8reports.forEach(function(r){ if(r.status!=='완료') upcoming.push({label:'8D 목표종결 ('+(r.scope||'-')+')',name:r.title,date:r.targetClose,status:r.status}); });
-  d.audits.forEach(function(r){ if(r.status!=='완료') upcoming.push({label:'감사',name:r.name,date:r.date,status:r.status}); });
-  d.gauges.forEach(function(r){ if(r.status!=='폐기') upcoming.push({label:'게이지 검교정',name:r.name,date:r.nextCal,status:r.status}); });
-  d.reliability.forEach(function(r){ if(r.status==='예정'||r.status==='진행중') upcoming.push({label:'정기 신뢰성 시험',name:r.partName,date:r.planDate,status:r.status}); });
-  d.suppliers.forEach(function(r){ if(!r.actualDate) upcoming.push({label:'협력사 Audit',name:r.name,date:r.planDate,status:r.status}); });
+  d.samples.forEach(function(r){ if(r.status!=='납품완료') upcoming.push({label:'샘플납기',name:r.part,date:r.dueDate,status:r.status,route:'samples',id:r.id}); });
+  d.d8reports.forEach(function(r){ if(r.status!=='완료') upcoming.push({label:'8D 목표종결 ('+(r.scope||'-')+')',name:r.title,date:r.targetClose,status:r.status,route:'d8reports',id:r.id}); });
+  d.audits.forEach(function(r){ if(r.status!=='완료') upcoming.push({label:'감사',name:r.name,date:r.date,status:r.status,route:'audits',id:r.id}); });
+  d.gauges.forEach(function(r){ if(r.status!=='폐기') upcoming.push({label:'게이지 검교정',name:r.name,date:r.nextCal,status:r.status,route:'gauges',id:r.id}); });
+  d.reliability.forEach(function(r){ if(r.status==='예정'||r.status==='진행중') upcoming.push({label:'정기 신뢰성 시험',name:r.partName,date:r.planDate,status:r.status,route:'reliability',id:r.id}); });
+  d.suppliers.forEach(function(r){ if(!r.actualDate) upcoming.push({label:'협력사 Audit',name:r.name,date:r.planDate,status:r.status,route:'suppliers',id:r.id}); });
+  d.isir4m.forEach(function(r){ if(r.status!=='승인완료' && r.status!=='반려') upcoming.push({label:'ISIR/4M('+(r.category||'-')+')',name:r.partName,date:r.applyDate,status:r.status,route:'isir4m',id:r.id}); });
   upcoming = upcoming.filter(function(u){return u.date;}).sort(function(a,b){return a.date<b.date?-1:1;}).slice(0,8);
   html += '<div class="table-wrap"><div class="table-scroll"><table><thead><tr><th>구분</th><th>내용</th><th>일자</th><th>상태</th></tr></thead><tbody>';
   upcoming.forEach(function(u){
-    html += '<tr><td><span class="badge b-neutral">'+u.label+'</span></td><td>'+u.name+'</td><td>'+ddayCell(u.date)+'</td><td>'+badge(u.status)+'</td></tr>';
+    html += '<tr data-dash-route="'+u.route+'" data-dash-id="'+escAttr(u.id)+'" style="cursor:pointer;"><td><span class="badge b-neutral">'+u.label+'</span></td><td>'+u.name+'</td><td>'+ddayCell(u.date)+'</td><td>'+badge(u.status)+'</td></tr>';
   });
   if(!upcoming.length){ html += '<tr class="empty-row"><td colspan="4">임박한 일정이 없습니다.</td></tr>'; }
   html += '</tbody></table></div></div></div>';
 
   document.getElementById('content').innerHTML = html;
 }
-function kpiCard(label, val, sub, toneKey){
+function kpiCard(label, val, sub, toneKey, route){
   var color = 'var(--'+(toneKey==='accent'?'accent':toneKey)+')';
-  return '<div class="kpi"><div class="kpi-accent" style="background:'+color+';"></div><div class="lbl">'+label+'</div><div class="val tnum">'+val+'</div><div class="sub">'+sub+'</div></div>';
+  var attrs = route ? ' data-dash-route="'+route+'" style="cursor:pointer;"' : '';
+  return '<div class="kpi"'+attrs+'><div class="kpi-accent" style="background:'+color+';"></div><div class="lbl">'+label+'</div><div class="val tnum">'+val+'</div><div class="sub">'+sub+'</div></div>';
 }
 
 /* ============================= LIST VIEW ============================= */
 var listUIState = {}; // per module: {q, status}
+/* Clicking a dashboard KPI card, status row, or upcoming-schedule row jumps
+   straight to the matching module's list, pre-filtered where that makes
+   sense (a specific status/extra value, or the one record's id so only that
+   row shows) instead of just landing on the module's unfiltered list. */
+function dashNavigate(route, opts){
+  opts = opts || {};
+  if(!MODULES[route] && route!=='suppliers') return;
+  if(!listUIState[route]) listUIState[route] = {q:'', status:'전체', year:'전체', extra:'전체'};
+  listUIState[route].status = opts.status || '전체';
+  listUIState[route].extra = opts.extra || '전체';
+  listUIState[route].year = '전체';
+  listUIState[route].q = opts.q || '';
+  if(route==='suppliers'){ supplierActiveTab = 'audit'; }
+  go(route);
+}
 function mailFieldName(mail, kind){
   if(kind==='date') return mail.dateField || 'dueDate';
   if(kind==='name') return mail.nameField || 'ownerName';
@@ -3214,6 +3248,15 @@ document.addEventListener('DOMContentLoaded', function(){
   });
 
   document.getElementById('content').addEventListener('click', function(e){
+    var dashEl = e.target.closest ? e.target.closest('[data-dash-route]') : null;
+    if(dashEl){
+      dashNavigate(dashEl.getAttribute('data-dash-route'), {
+        status: dashEl.getAttribute('data-dash-status'),
+        extra: dashEl.getAttribute('data-dash-extra'),
+        q: dashEl.getAttribute('data-dash-id')
+      });
+      return;
+    }
     var delBtn = e.target.closest ? e.target.closest('[data-staff-del]') : null;
     if(delBtn){
       var delId = delBtn.getAttribute('data-staff-del');
