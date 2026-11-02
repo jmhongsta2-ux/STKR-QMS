@@ -284,6 +284,8 @@ tbody tr:hover{background:var(--surface-2);}
 /* Excel-like inline grid entry (PDS 검사일지): every cell is a live input
    so values can be typed directly into the table, the same way the team's
    spreadsheet works, instead of opening a popup per record. */
+.date-range-lbl{font-size:12px;color:var(--muted);white-space:nowrap;}
+.date-range-sep{color:var(--muted);}
 .grid-table td{padding:4px 4px;}
 .grid-cell{
   width:100%;box-sizing:border-box;border:1px solid transparent;background:transparent;
@@ -1707,6 +1709,8 @@ var MODULES = {
     searchKeys:['id','customer','model','part','symptomType','occurType','ownerName','ownerEmail'],
     statusField:'status', statusFilters:['전체','접수','조사중','8D진행','종결'],
     yearFilterField:'date',
+    dateRangeFilter:true, dateRangeLabel:'접수일',
+    extraFilterField:'occurType', extraFilterLabel:'발생구분', extraFilterOptions:['전체','0km','3M','기타'],
     columns:[
       {key:'id', label:'클레임번호', cls:'mono cell-strong'},
       {key:'date', label:'접수일'},
@@ -2965,6 +2969,8 @@ function dashNavigate(route, opts){
   listUIState[route].status = opts.status || '전체';
   listUIState[route].extra = opts.extra || '전체';
   listUIState[route].year = '전체';
+  listUIState[route].from = '';
+  listUIState[route].to = '';
   listUIState[route].q = opts.q || '';
   if(route==='suppliers'){ supplierActiveTab = 'audit'; }
   go(route);
@@ -3030,7 +3036,12 @@ function filteredRowsFor(modKey){
     if(m.extraFilterField && ui.extra && ui.extra!=='전체'){
       matchE = r[m.extraFilterField]===ui.extra;
     }
-    return matchQ && matchS && matchY && matchE;
+    var matchD = true;
+    if(m.dateRangeFilter && m.yearFilterField && (ui.from || ui.to)){
+      var dd = String(r[m.yearFilterField]||'').slice(0,10);
+      matchD = !!dd && (!ui.from || dd>=ui.from) && (!ui.to || dd<=ui.to);
+    }
+    return matchQ && matchS && matchY && matchE && matchD;
   });
 }
 
@@ -3111,6 +3122,12 @@ function renderList(modKey, containerId, hideHeader){
     for(var yf=2023; yf<=2032; yf++){ html += '<option value="'+yf+'"'+(String(ui.year)===String(yf)?' selected':'')+'>'+yf+'년</option>'; }
     html += '</select>';
   }
+  if(m.dateRangeFilter){
+    var drl = escAttr(m.dateRangeLabel||'기간');
+    html += '<label class="date-range-lbl">'+drl+'</label><input type="date" class="filter" id="listDateFrom" title="'+drl+' 시작일" value="'+escAttr(ui.from||'')+'">';
+    html += '<span class="date-range-sep">~</span><input type="date" class="filter" id="listDateTo" title="'+drl+' 종료일" value="'+escAttr(ui.to||'')+'">';
+    if(ui.from || ui.to){ html += '<button type="button" class="btn sm" id="listDateClear" title="기간 조건 해제">기간 해제</button>'; }
+  }
   if(m.extraFilterField){
     html += '<select class="filter" id="listExtraFilter">';
     (m.extraFilterOptions||['전체']).forEach(function(o){ html += '<option value="'+o+'"'+(ui.extra===o?' selected':'')+'>'+(o==='전체'?'전체 '+(m.extraFilterLabel||''):o)+'</option>'; });
@@ -3166,6 +3183,21 @@ function renderList(modKey, containerId, hideHeader){
   }
   if(document.getElementById('listExtraFilter')){
     document.getElementById('listExtraFilter').addEventListener('change', function(e){ ui.extra = e.target.value; renderList(modKey, containerId, hideHeader); });
+  }
+  if(document.getElementById('listDateFrom')){
+    document.getElementById('listDateFrom').addEventListener('change', function(e){
+      ui.from = e.target.value;
+      if(ui.from && ui.to && ui.from>ui.to){ ui.to = ui.from; }
+      renderList(modKey, containerId, hideHeader);
+    });
+    document.getElementById('listDateTo').addEventListener('change', function(e){
+      ui.to = e.target.value;
+      if(ui.from && ui.to && ui.to<ui.from){ ui.from = ui.to; }
+      renderList(modKey, containerId, hideHeader);
+    });
+    if(document.getElementById('listDateClear')){
+      document.getElementById('listDateClear').addEventListener('click', function(){ ui.from=''; ui.to=''; renderList(modKey, containerId, hideHeader); });
+    }
   }
   document.getElementById('btnAddRow').addEventListener('click', function(){ openModal(modKey, null); });
   if(modKey==='claims' && document.getElementById('btnClaimsReport')){
