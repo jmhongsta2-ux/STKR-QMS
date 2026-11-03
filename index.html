@@ -2268,7 +2268,7 @@ var MODULES = {
       {key:'lotNo', label:'LOT NO', type:'text', placeholder:'예: 232/23'},
       {key:'qtyInspected', label:'검사수량', type:'number', required:true},
       {key:'qtyOk', label:'OK수량', type:'number'},
-      {key:'qtyCok', label:'3.5 COK수량', type:'number'},
+      {key:'qtyCok', label:'3.5 (COK) 수량', type:'number'},
       {key:'qtyNok', label:'NOK수량', type:'number'},
       {key:'defRattling', label:'NOK유형 - Rattling', type:'number'},
       {key:'defRattling35', label:'NOK유형 - 3.5 Rattling', type:'number'},
@@ -2302,7 +2302,7 @@ var PDS_LINE_TABS = [
   {key:'rs4pere', label:'RS4 PE 재검사', line:'RS4 PE 재검사', defects:['defRattling4','defDak45','defTokAuto']}
 ];
 var PDS_DEFECT_LABELS = {
-  defRattling:'Rattling', defRattling35:'3.5 Rattling', defRattling4:'4 Rattling', defDak45:'4.5 Dak', defTokAuto:'TOK(Automatic)', defSwinging:'Swinging', defSizzling:'Sizzling', defScreaming:'Screaming',
+  qtyCok:'3.5', defRattling:'Rattling', defRattling35:'3.5 Rattling', defRattling4:'4 Rattling', defDak45:'4.5 Dak', defTokAuto:'TOK(Automatic)', defSwinging:'Swinging', defSizzling:'Sizzling', defScreaming:'Screaming',
   defBacklash:'Backlash', defHumming:'Humming', defFunctionNok:'Function NOK', defCreaking:'Creaking',
   defUnidentified:'식별불가', defEtc:'기타'
 };
@@ -2447,7 +2447,7 @@ function renderPdsDeliveryGrid(tabCfg){
 var pdsAnalysisFilter = {year:'전체', startDate:'', endDate:'', carModel:'전체', doorName:'전체'};
 var ALL_DEFECT_KEYS = ['defRattling','defRattling4','defDak45','defTokAuto','defSwinging','defSizzling','defScreaming','defBacklash','defHumming','defFunctionNok','defCreaking','defUnidentified','defEtc'];
 var PDS_DEFECT_COLORS = {
-  defRattling:'#2563eb', defRattling35:'#1d4ed8', defRattling4:'#60a5fa', defDak45:'#0ea5e9', defTokAuto:'#a855f7', defSwinging:'#dc2626', defSizzling:'#f59e0b', defScreaming:'#10b981',
+  qtyCok:'#14b8a6', defRattling:'#2563eb', defRattling35:'#1d4ed8', defRattling4:'#60a5fa', defDak45:'#0ea5e9', defTokAuto:'#a855f7', defSwinging:'#dc2626', defSizzling:'#f59e0b', defScreaming:'#10b981',
   defBacklash:'#8b5cf6', defHumming:'#ec4899', defFunctionNok:'#06b6d4', defCreaking:'#84cc16',
   defUnidentified:'#f97316', defEtc:'#6b7280'
 };
@@ -2646,7 +2646,7 @@ function renderPdsStatus(){
   html += '</tbody></table></div></div>';
 
   /* 집계 근거: 지금 화면 숫자가 어떤 검사라인(시트) 데이터로 구성되어 있는지, 내용이 똑같은 중복 행은 없는지 확인 */
-  var byLine = {}, fpCount = {}, dupRows = 0;
+  var byLine = {}, fpCount = {}, dupRows = 0, dupQty = 0;
   rows.forEach(function(r){
     var ln = r.line || '(검사라인 미지정)';
     if(!byLine[ln]) byLine[ln] = {n:0, insp:0, ok:0, cok:0, nok:0};
@@ -2655,11 +2655,15 @@ function renderPdsStatus(){
     byLine[ln].insp += parseFloat(r.qtyInspected)||0;
     byLine[ln].ok += parseFloat(r.qtyOk)||0;
     byLine[ln].nok += parseFloat(r.qtyNok)||0;
-    var fpk = [r.line,r.inspDate,r.workerName,r.category,r.doorName,r.lotNo,r.qtyInspected,r.qtyOk,r.qtyNok].join('|');
+    var fpk = [r.line,r.inspDate,r.workerName,r.category,r.doorName,r.lotNo,r.qtyInspected,r.qtyOk].join('|');
     fpCount[fpk] = (fpCount[fpk]||0)+1;
+    if(fpCount[fpk]>1){ dupQty += parseFloat(r.qtyInspected)||0; }
   });
   Object.keys(fpCount).forEach(function(k){ if(fpCount[k]>1) dupRows += fpCount[k]-1; });
-  html += '<div class="table-wrap" style="margin-bottom:14px;"><div class="table-scroll"><table><thead><tr><th>집계 근거 · 검사라인(시트)</th><th>행 수</th><th>검사수량</th><th>OK</th><th>3.5(COK)</th><th>NOK</th></tr></thead><tbody>';
+  if(dupRows>0 && tot.insp>0 && dupQty/tot.insp>0.2){
+    html += '<div class="callout warn" style="margin-bottom:14px;padding:12px 14px;border:1px solid var(--warn,#f59e0b);border-radius:10px;background:rgba(245,158,11,.1);font-size:13px;"><b>중복 데이터 의심:</b> 내용이 완전히 같은 행 '+dupRows+'건(검사수량 '+dupQty.toLocaleString()+')이 포함되어 있습니다. 엑셀을 여러 번 가져왔거나 예전 데이터가 남아 있을 수 있습니다. 검사일지(PDS) 화면의 <b>엑셀로 전체 교체</b>로 원본 파일을 다시 가져오면 정리됩니다.</div>';
+  }
+  html += '<div class="table-wrap" style="margin-bottom:14px;"><div class="table-scroll"><table><thead><tr><th>집계 근거 · 검사라인(시트)</th><th>행 수</th><th>검사수량</th><th>OK</th><th>3.5 (COK)</th><th>NOK</th></tr></thead><tbody>';
   var lineKeys = Object.keys(byLine);
   if(!lineKeys.length){ html += '<tr class="empty-row"><td colspan="6">데이터가 없습니다.</td></tr>'; }
   lineKeys.forEach(function(ln){
@@ -2711,7 +2715,13 @@ function xlsxDateToISO(v){
   if(m2){ return m2[1]+'-'+('0'+m2[2]).slice(-2)+'-'+('0'+m2[3]).slice(-2); }
   return '';
 }
-function pdsNum(v){ var x = parseFloat(v); return isNaN(x) ? 0 : x; }
+function pdsNum(v){
+  if(typeof v==='number'){ return isFinite(v) ? v : 0; }
+  // '566ut' 같은 오타 문자열을 숫자로 오인하지 않도록, 숫자만 있는 문자열만 인정
+  var t = String(v===null||v===undefined?'':v).replace(/,/g,'').trim();
+  if(!/^-?\d+(\.\d+)?$/.test(t)) return 0;
+  return parseFloat(t);
+}
 function pdsStr(v){ return (v===null||v===undefined) ? '' : String(v).trim(); }
 
 function parseRs4Row(row){
@@ -2799,7 +2809,11 @@ function parseByHeaderRow(row, map, line){
     if(map[k]!==undefined){ var v = pdsNum(row[map[k]]); if(v) rec[k] = v; }
   });
   // NOK가 비어 있으면 검사수량-OK로 보정
-  if(!rec.qtyNok && rec.qtyInspected && rec.qtyOk && rec.qtyInspected>rec.qtyOk+rec.qtyCok){ rec.qtyNok = rec.qtyInspected-rec.qtyOk-rec.qtyCok; }
+  // NOK = 3.5(COK)·Inspected·OK를 제외한 모든 불량 항목(4 Rattling, 4.5 Dak, TOK 등)의 합. 항목 값이 없으면 엑셀 NOK Qty 열 사용.
+  var dsum = 0;
+  ['defRattling','defRattling4','defDak45','defTokAuto','defSwinging','defSizzling','defScreaming','defBacklash','defHumming','defFunctionNok','defCreaking','defUnidentified','defEtc'].forEach(function(k){ dsum += rec[k]||0; });
+  if(dsum>0){ rec.qtyNok = dsum; }
+  else if(!rec.qtyNok && rec.qtyInspected && rec.qtyOk && rec.qtyInspected>rec.qtyOk+rec.qtyCok){ rec.qtyNok = rec.qtyInspected-rec.qtyOk-rec.qtyCok; }
   return rec;
 }
 function pdsNormSheetName(n){ return String(n||'').replace(/\s+/g,'').toLowerCase(); }
@@ -2868,7 +2882,7 @@ function importPdsWorkbook(file, replaceMode){
       var sheetsFound = 0, skippedOld = 0;
       // 이미 등록된 행은 다시 가져오지 않도록(중복 방지) 내용 기준 지문을 만든다.
       function fp(target, r){
-        if(target==='inspectionLog'){ return ['L',r.line,r.inspDate,r.workerName,r.category,r.doorName,r.lotNo,r.qtyInspected,r.qtyOk,r.qtyNok].join('|'); }
+        if(target==='inspectionLog'){ return ['L',r.line,r.inspDate,r.workerName,r.category,r.doorName,r.lotNo,r.qtyInspected,r.qtyOk].join('|'); }
         return ['D',r.date,r.doorNum,r.doorName,r.qty,r.note].join('|');
       }
       var seen = {};
@@ -2941,7 +2955,9 @@ function importPdsWorkbook(file, replaceMode){
                 showToast('가져오는 중입니다... ('+done+'/'+n+')');
               });
             }).then(function(){
-              state[k] = state[k].concat(byTarget[k]);
+              // 실시간 동기화(onSnapshot)가 이미 새 행을 state에 넣었을 수 있으므로 id 기준으로 병합 (중복 방지)
+              var have = {}; (state[k]||[]).forEach(function(r){ have[r.id] = true; });
+              byTarget[k].forEach(function(r){ if(!have[r.id]){ state[k].push(r); } });
             });
           });
           chain.then(function(){
