@@ -1592,7 +1592,7 @@ var STATUS_TONE = {
   '적합':'good','부적합':'critical','교정예정':'warning','폐기':'neutral',
   '보류':'warning','전산등록':'accent','불필요':'neutral',
   '신청중':'warning','고객승인대기':'accent','승인완료':'good','반려':'critical',
-  'RS4':'accent','JG 신검사':'neutral','JG 재검사':'warning'
+  'RS4':'accent','RS4 PE':'accent','RS4 PE 재검사':'warning','JG 신검사':'neutral','JG 재검사':'warning'
 };
 function tone(v){ return STATUS_TONE[v] || 'neutral'; }
 function badge(v){ if(!v) return '<span class="cell-muted">-</span>'; return '<span class="badge b-'+tone(v)+'">'+v+'</span>'; }
@@ -2241,7 +2241,7 @@ var MODULES = {
     key:'inspectionLog', label:'검사 일지(PDS)', icon:'inspect', idPrefix:'PD',
     sub:'PDS 라인(RS4/JG)의 일일 검사 실적과 NOK 유형별 수량을 관리합니다.',
     searchKeys:['id','workerName','category','doorName','lotNo'],
-    statusField:'line', statusFilters:['전체','RS4','JG 신검사','JG 재검사'],
+    statusField:'line', statusFilters:['전체','RS4','RS4 PE','RS4 PE 재검사','JG 신검사','JG 재검사'],
     yearFilterField:'inspDate',
     columns:[
       {key:'line', label:'검사라인', render:function(r){return '<span class="badge b-'+tone(r.line)+'">'+r.line+'</span>';}},
@@ -2260,7 +2260,7 @@ var MODULES = {
       }}
     ],
     fields:[
-      {key:'line', label:'검사라인', type:'select', options:['RS4','JG 신검사','JG 재검사'], required:true},
+      {key:'line', label:'검사라인', type:'select', options:['RS4','RS4 PE','RS4 PE 재검사','JG 신검사','JG 재검사'], required:true},
       {key:'inspDate', label:'검사일자', type:'date', required:true},
       {key:'workerName', label:'작업자', type:'text', list:'staffNameList', placeholder:'명부에서 자동완성됩니다'},
       {key:'category', label:'분류(품번)', type:'text', placeholder:'예: 358319'},
@@ -2268,10 +2268,13 @@ var MODULES = {
       {key:'lotNo', label:'LOT NO', type:'text', placeholder:'예: 232/23'},
       {key:'qtyInspected', label:'검사수량', type:'number', required:true},
       {key:'qtyOk', label:'OK수량', type:'number'},
+      {key:'qtyCok', label:'3.5 COK수량', type:'number'},
       {key:'qtyNok', label:'NOK수량', type:'number'},
       {key:'defRattling', label:'NOK유형 - Rattling', type:'number'},
       {key:'defRattling35', label:'NOK유형 - 3.5 Rattling', type:'number'},
       {key:'defRattling4', label:'NOK유형 - 4 Rattling', type:'number'},
+      {key:'defDak45', label:'NOK유형 - 4.5 Dak', type:'number'},
+      {key:'defTokAuto', label:'NOK유형 - TOK(Automatic)', type:'number'},
       {key:'defSwinging', label:'NOK유형 - Swinging', type:'number'},
       {key:'defSizzling', label:'NOK유형 - Sizzling', type:'number'},
       {key:'defScreaming', label:'NOK유형 - Screaming', type:'number'},
@@ -2293,11 +2296,13 @@ var MODULE_ORDER = ['claims','samples','suppliers','gauges','reliability','d8rep
    입력하고, 칸을 벗어나면(change) 즉시 그 레코드만 저장된다. */
 var PDS_LINE_TABS = [
   {key:'rs4', label:'RS4 Daily', line:'RS4', defects:['defRattling','defSwinging','defSizzling','defScreaming','defBacklash','defHumming','defFunctionNok','defCreaking','defEtc']},
-  {key:'jg', label:'JG Daily', line:'JG 신검사', defects:['defRattling35','defRattling4','defBacklash','defUnidentified']},
-  {key:'jgre', label:'JG 재검사', line:'JG 재검사', defects:['defRattling35','defRattling4','defBacklash']}
+  {key:'jg', label:'JG Daily', line:'JG 신검사', defects:['defRattling4','defDak45','defTokAuto','defBacklash','defUnidentified']},
+  {key:'jgre', label:'JG 재검사', line:'JG 재검사', defects:['defRattling4','defDak45','defTokAuto','defBacklash']},
+  {key:'rs4pe', label:'RS4 PE Daily', line:'RS4 PE', defects:['defRattling4','defDak45','defTokAuto']},
+  {key:'rs4pere', label:'RS4 PE 재검사', line:'RS4 PE 재검사', defects:['defRattling4','defDak45','defTokAuto']}
 ];
 var PDS_DEFECT_LABELS = {
-  defRattling:'Rattling', defRattling35:'3.5 Rattling', defRattling4:'4 Rattling', defSwinging:'Swinging', defSizzling:'Sizzling', defScreaming:'Screaming',
+  defRattling:'Rattling', defRattling35:'3.5 Rattling', defRattling4:'4 Rattling', defDak45:'4.5 Dak', defTokAuto:'TOK(Automatic)', defSwinging:'Swinging', defSizzling:'Sizzling', defScreaming:'Screaming',
   defBacklash:'Backlash', defHumming:'Humming', defFunctionNok:'Function NOK', defCreaking:'Creaking',
   defUnidentified:'식별불가', defEtc:'기타'
 };
@@ -2324,6 +2329,7 @@ function renderPdsPage(){
   html += '<div class="toolbar" style="margin-bottom:14px;">';
   html += '<div class="spacer"></div>';
   html += '<label class="btn" style="cursor:pointer;" title="PDS 엑셀 파일의 각 시트를 한 번에 가져옵니다.">'+ICONS.download+'<span>엑셀 업로드 (PDS 이력 가져오기)</span><input type="file" accept=".xlsx,.xls" hidden id="pdsExcelImportInput"></label>';
+  html += '<label class="btn" style="cursor:pointer;" title="현재 저장된 검사일지를 모두 지우고 엑셀 내용으로 교체합니다. (중복·잘못 들어간 데이터를 정리할 때 사용)">'+ICONS.download+'<span>엑셀로 전체 교체</span><input type="file" accept=".xlsx,.xls" hidden id="pdsExcelReplaceInput"></label>';
   html += '</div>';
   html += '<div class="tabbar">';
   pdsAllTabs().forEach(function(t){
@@ -2333,6 +2339,11 @@ function renderPdsPage(){
   html += '<div id="pdsTabBody"></div>';
   document.getElementById('content').innerHTML = html;
 
+  document.getElementById('pdsExcelReplaceInput').addEventListener('change', function(e){
+    var f = e.target.files && e.target.files[0];
+    if(f){ importPdsWorkbook(f, true); }
+    e.target.value = '';
+  });
   document.getElementById('pdsExcelImportInput').addEventListener('change', function(e){
     var f = e.target.files && e.target.files[0];
     if(f){ importPdsWorkbook(f); }
@@ -2367,7 +2378,7 @@ function renderPdsInspGrid(tabCfg){
       '<a href="#" data-pds-toggle-all="'+tabCfg.key+'" style="color:var(--accent);">'+(showAll?'최신 '+PDS_GRID_LIMIT+'건만 보기':'전체 보기 (느릴 수 있습니다)')+'</a></div></div>';
   }
   html += '<div class="table-wrap"><div class="table-scroll"><table class="grid-table"><thead><tr>';
-  html += '<th style="width:34px;">#</th><th>검사일자</th><th>작업자</th><th>분류(품번)</th><th>Door Name</th><th>LOT NO</th><th>검사수량</th><th>OK</th><th>NOK</th>';
+  html += '<th style="width:34px;">#</th><th>검사일자</th><th>작업자</th><th>분류(품번)</th><th>Door Name</th><th>LOT NO</th><th>검사수량</th><th>OK</th><th>3.5 (COK)</th><th>NOK</th>';
   defects.forEach(function(dk){ html += '<th>'+PDS_DEFECT_LABELS[dk]+'</th>'; });
   html += '<th>불량률</th><th>비고</th><th></th></tr></thead><tbody>';
   rows.forEach(function(r, idx){
@@ -2381,6 +2392,7 @@ function renderPdsInspGrid(tabCfg){
     html += '<td><input class="grid-cell" type="text" data-pds-field="lotNo" value="'+escAttr(r.lotNo||'')+'"></td>';
     html += '<td><input class="grid-cell num" type="number" data-pds-field="qtyInspected" value="'+escAttr(r.qtyInspected||'')+'"></td>';
     html += '<td><input class="grid-cell num" type="number" data-pds-field="qtyOk" value="'+escAttr(r.qtyOk||'')+'"></td>';
+    html += '<td><input class="grid-cell num" type="number" data-pds-field="qtyCok" value="'+escAttr(r.qtyCok||'')+'"></td>';
     html += '<td><input class="grid-cell num" type="number" data-pds-field="qtyNok" value="'+escAttr(r.qtyNok||'')+'"></td>';
     defects.forEach(function(dk){
       html += '<td><input class="grid-cell num" type="number" data-pds-field="'+dk+'" value="'+escAttr(r[dk]||'')+'"></td>';
@@ -2390,7 +2402,7 @@ function renderPdsInspGrid(tabCfg){
     html += '<td><button class="icon-btn" data-pds-del="'+r.id+'" data-pds-modkey="inspectionLog" title="삭제">'+ICONS.trash+'</button></td>';
     html += '</tr>';
   });
-  if(!rows.length){ html += '<tr class="empty-row"><td colspan="'+(10+defects.length+2)+'">데이터가 없습니다. 아래 "행 추가"로 입력을 시작하세요.</td></tr>'; }
+  if(!rows.length){ html += '<tr class="empty-row"><td colspan="'+(11+defects.length+2)+'">데이터가 없습니다. 아래 "행 추가"로 입력을 시작하세요.</td></tr>'; }
   html += '</tbody></table></div>';
   html += '<div style="padding:10px 14px;border-top:1px solid var(--line);">';
   html += '<button type="button" class="btn" data-pds-addrow="insp" data-pds-line="'+tabCfg.line+'">'+ICONS.plus+'<span>행 추가</span></button>';
@@ -2433,14 +2445,22 @@ function renderPdsDeliveryGrid(tabCfg){
    (사용자 확인: "차종분류는 진짜 차종 'JG 와 RS4' 두종류만"). Door Name은 별도
    필터 축으로 추가한다. */
 var pdsAnalysisFilter = {year:'전체', startDate:'', endDate:'', carModel:'전체', doorName:'전체'};
-var ALL_DEFECT_KEYS = ['defRattling','defRattling35','defRattling4','defSwinging','defSizzling','defScreaming','defBacklash','defHumming','defFunctionNok','defCreaking','defUnidentified','defEtc'];
+var ALL_DEFECT_KEYS = ['defRattling','defRattling4','defDak45','defTokAuto','defSwinging','defSizzling','defScreaming','defBacklash','defHumming','defFunctionNok','defCreaking','defUnidentified','defEtc'];
 var PDS_DEFECT_COLORS = {
-  defRattling:'#2563eb', defRattling35:'#1d4ed8', defRattling4:'#60a5fa', defSwinging:'#dc2626', defSizzling:'#f59e0b', defScreaming:'#10b981',
+  defRattling:'#2563eb', defRattling35:'#1d4ed8', defRattling4:'#60a5fa', defDak45:'#0ea5e9', defTokAuto:'#a855f7', defSwinging:'#dc2626', defSizzling:'#f59e0b', defScreaming:'#10b981',
   defBacklash:'#8b5cf6', defHumming:'#ec4899', defFunctionNok:'#06b6d4', defCreaking:'#84cc16',
   defUnidentified:'#f97316', defEtc:'#6b7280'
 };
 
-function pdsCarModel(line){ return line==='RS4' ? 'RS4' : 'JG'; }
+/* 차종(JG / RS4 / RS4PE / RG3): 검사라인(시트)으로 구분하고, Door Name에 'RG3'가 들어가면 RG3로 본다. */
+var PDS_CAR_MODELS = ['JG','RS4','RS4PE','RG3'];
+function pdsCarModel(r){
+  if(/RG3/i.test(String(r.doorName||''))) return 'RG3';
+  var line = String(r.line||'');
+  if(line.indexOf('RS4 PE')===0) return 'RS4PE';
+  if(line==='RS4') return 'RS4';
+  return 'JG';
+}
 function pdsDoorNames(){
   var set = {};
   state.inspectionLog.forEach(function(r){ if(r.doorName){ set[r.doorName]=true; } });
@@ -2450,7 +2470,7 @@ function pdsFilteredRows(ignoreCarModel, ignoreDoorName){
   var f = pdsAnalysisFilter;
   return state.inspectionLog.filter(function(r){
     if(!r.inspDate) return false;
-    if(!ignoreCarModel && f.carModel!=='전체' && pdsCarModel(r.line)!==f.carModel) return false;
+    if(!ignoreCarModel && f.carModel!=='전체' && pdsCarModel(r)!==f.carModel) return false;
     if(!ignoreDoorName && f.doorName!=='전체' && r.doorName!==f.doorName) return false;
     if(f.startDate && r.inspDate < f.startDate) return false;
     if(f.endDate && r.inspDate > f.endDate) return false;
@@ -2571,8 +2591,7 @@ function renderPdsStatus(){
   html += '<div><label style="font-size:11.5px;color:var(--muted);display:block;margin-bottom:3px;">종료일</label><input type="date" class="filter" data-pds-filter="end" value="'+escAttr(f.endDate)+'"></div>';
   html += '<div><label style="font-size:11.5px;color:var(--muted);display:block;margin-bottom:3px;">차종</label><select class="filter" data-pds-filter="carModel">';
   html += '<option value="전체"'+(f.carModel==='전체'?' selected':'')+'>전체 차종 통합</option>';
-  html += '<option value="RS4"'+(f.carModel==='RS4'?' selected':'')+'>RS4</option>';
-  html += '<option value="JG"'+(f.carModel==='JG'?' selected':'')+'>JG</option>';
+  PDS_CAR_MODELS.forEach(function(cm){ html += '<option value="'+cm+'"'+(f.carModel===cm?' selected':'')+'>'+cm+'</option>'; });
   html += '</select></div>';
   html += '<div><label style="font-size:11.5px;color:var(--muted);display:block;margin-bottom:3px;">Door Name</label><select class="filter" data-pds-filter="doorName">';
   html += '<option value="전체"'+(f.doorName==='전체'?' selected':'')+'>전체 Door</option>';
@@ -2584,12 +2603,13 @@ function renderPdsStatus(){
   }
   html += '</div>';
 
-  var tot = {insp:0, ok:0, nok:0};
-  rows.forEach(function(r){ tot.insp+=parseFloat(r.qtyInspected)||0; tot.ok+=parseFloat(r.qtyOk)||0; tot.nok+=parseFloat(r.qtyNok)||0; });
+  var tot = {insp:0, ok:0, cok:0, nok:0};
+  rows.forEach(function(r){ tot.insp+=parseFloat(r.qtyInspected)||0; tot.ok+=parseFloat(r.qtyOk)||0; tot.cok+=parseFloat(r.qtyCok)||0; tot.nok+=parseFloat(r.qtyNok)||0; });
   var totRate = tot.insp ? (tot.nok/tot.insp*100).toFixed(2) : '0.00';
   html += '<div class="pds-stat-cards">';
   html += '<div class="pds-stat-card"><div class="lbl">검사수량</div><div class="val">'+tot.insp.toLocaleString()+'</div></div>';
   html += '<div class="pds-stat-card"><div class="lbl">OK수량</div><div class="val">'+tot.ok.toLocaleString()+'</div></div>';
+  html += '<div class="pds-stat-card"><div class="lbl">3.5 (COK)</div><div class="val">'+tot.cok.toLocaleString()+'</div></div>';
   html += '<div class="pds-stat-card"><div class="lbl">NOK수량</div><div class="val">'+tot.nok.toLocaleString()+'</div></div>';
   html += '<div class="pds-stat-card"><div class="lbl">불량률</div><div class="val">'+totRate+'%</div></div>';
   html += '</div>';
@@ -2608,13 +2628,13 @@ function renderPdsStatus(){
 
   var byModel = {};
   pdsFilteredRows(true, true).forEach(function(r){
-    var c = pdsCarModel(r.line);
+    var c = pdsCarModel(r);
     if(!byModel[c]) byModel[c] = {insp:0, ok:0, nok:0};
     byModel[c].insp += parseFloat(r.qtyInspected)||0;
     byModel[c].ok += parseFloat(r.qtyOk)||0;
     byModel[c].nok += parseFloat(r.qtyNok)||0;
   });
-  var modelKeys = Object.keys(byModel).sort(function(a,b){ return byModel[b].insp-byModel[a].insp; });
+  var modelKeys = PDS_CAR_MODELS.filter(function(c){ return byModel[c]; });
   html += '<div class="table-wrap"><div class="table-scroll"><table><thead><tr><th>차종</th><th>검사수량</th><th>OK</th><th>NOK</th><th>불량률</th></tr></thead><tbody>';
   if(!modelKeys.length){ html += '<tr class="empty-row"><td colspan="5">데이터가 없습니다.</td></tr>'; }
   modelKeys.forEach(function(c){
@@ -2624,6 +2644,29 @@ function renderPdsStatus(){
     html += '<tr'+hi+'><td class="cell-strong">'+escHtml(c)+'</td><td>'+b.insp.toLocaleString()+'</td><td>'+b.ok.toLocaleString()+'</td><td>'+b.nok.toLocaleString()+'</td><td>'+rate+'%</td></tr>';
   });
   html += '</tbody></table></div></div>';
+
+  /* 집계 근거: 지금 화면 숫자가 어떤 검사라인(시트) 데이터로 구성되어 있는지, 내용이 똑같은 중복 행은 없는지 확인 */
+  var byLine = {}, fpCount = {}, dupRows = 0;
+  rows.forEach(function(r){
+    var ln = r.line || '(검사라인 미지정)';
+    if(!byLine[ln]) byLine[ln] = {n:0, insp:0, ok:0, cok:0, nok:0};
+    byLine[ln].n++;
+    byLine[ln].cok += parseFloat(r.qtyCok)||0;
+    byLine[ln].insp += parseFloat(r.qtyInspected)||0;
+    byLine[ln].ok += parseFloat(r.qtyOk)||0;
+    byLine[ln].nok += parseFloat(r.qtyNok)||0;
+    var fpk = [r.line,r.inspDate,r.workerName,r.category,r.doorName,r.lotNo,r.qtyInspected,r.qtyOk,r.qtyNok].join('|');
+    fpCount[fpk] = (fpCount[fpk]||0)+1;
+  });
+  Object.keys(fpCount).forEach(function(k){ if(fpCount[k]>1) dupRows += fpCount[k]-1; });
+  html += '<div class="table-wrap" style="margin-bottom:14px;"><div class="table-scroll"><table><thead><tr><th>집계 근거 · 검사라인(시트)</th><th>행 수</th><th>검사수량</th><th>OK</th><th>3.5(COK)</th><th>NOK</th></tr></thead><tbody>';
+  var lineKeys = Object.keys(byLine);
+  if(!lineKeys.length){ html += '<tr class="empty-row"><td colspan="6">데이터가 없습니다.</td></tr>'; }
+  lineKeys.forEach(function(ln){
+    var b = byLine[ln];
+    html += '<tr><td class="cell-strong">'+escHtml(ln)+'</td><td>'+b.n.toLocaleString()+'</td><td>'+b.insp.toLocaleString()+'</td><td>'+b.ok.toLocaleString()+'</td><td>'+b.cok.toLocaleString()+'</td><td>'+b.nok.toLocaleString()+'</td></tr>';
+  });
+  html += '</tbody></table></div><div class="pager"><span>'+(dupRows ? '내용이 완전히 같은 행 <b>'+dupRows+'건</b> 포함 (중복 등록 가능성)' : '내용이 완전히 같은 중복 행 없음')+'</span><span class="mono">현재 필터 기준</span></div></div>';
 
   var byDoor = {};
   pdsFilteredRows(false, true).forEach(function(r){
@@ -2708,10 +2751,65 @@ function parseDeliveryRow(row){
   return { date:date, doorNum:doorNum, doorName:pdsStr(row[2]), qty:pdsNum(row[3]), note:pdsStr(row[4]) };
 }
 
+/* RS4 PE 시트는 컬럼 순서를 알 수 없어서(기존 RS4/JG 시트와 같은 양식을 가정), 헤더 이름으로 컬럼을 찾아 읽는다. */
+function pdsHeaderMap(headerRow){
+  var map = {};
+  (headerRow||[]).forEach(function(h, idx){
+    var t = String(h===null||h===undefined?'':h).replace(/\s+/g,' ').trim().toLowerCase();
+    if(!t) return;
+    var key = null;
+    if(/불량 ?유형/.test(t)) key=null;
+    else if(/inspection ?date|검사일/.test(t)) key='inspDate';
+    else if(/작업자/.test(t)) key='workerName';
+    else if(/^분류/.test(t)) key='category';
+    else if(/door ?name/.test(t)) key='doorName';
+    else if(/^lot/.test(t)) key='lotNo';
+    else if(/inspected/.test(t)) key='qtyInspected';
+    else if(/^ok/.test(t)) key='qtyOk';
+    else if(/^nok/.test(t)) key='qtyNok';
+    else if(/\+/.test(t) || /불량률|total/.test(t)) key=null;
+    else if(/^3\.5/.test(t)) key='qtyCok';
+    else if(/^4\.5/.test(t)) key='defDak45';
+    else if(/^tok/.test(t)) key='defTokAuto';
+    else if(/^4 ?rattling/.test(t)) key='defRattling4';
+    else if(/^rattling/.test(t)) key='defRattling';
+    else if(/swinging/.test(t)) key='defSwinging';
+    else if(/sizzling/.test(t)) key='defSizzling';
+    else if(/screaming/.test(t)) key='defScreaming';
+    else if(/backlash/.test(t)) key='defBacklash';
+    else if(/humming/.test(t)) key='defHumming';
+    else if(/function/.test(t)) key='defFunctionNok';
+    else if(/creaking/.test(t)) key='defCreaking';
+    else if(/식별/.test(t)) key='defUnidentified';
+    else if(/^기타|^etc/.test(t)) key='defEtc';
+    if(key && map[key]===undefined) map[key] = idx;
+  });
+  return map;
+}
+function parseByHeaderRow(row, map, line){
+  var date = xlsxDateToISO(row[map.inspDate]), worker = map.workerName!==undefined ? pdsStr(row[map.workerName]) : '';
+  if(!date && !worker) return null;
+  var rec = {line:line, inspDate:date, workerName:worker,
+    category: map.category!==undefined ? pdsStr(row[map.category]) : '',
+    doorName: map.doorName!==undefined ? pdsStr(row[map.doorName]) : '',
+    lotNo: map.lotNo!==undefined ? pdsStr(row[map.lotNo]) : '',
+    qtyInspected: pdsNum(row[map.qtyInspected]), qtyOk: pdsNum(row[map.qtyOk]), qtyNok: pdsNum(row[map.qtyNok]),
+    qtyCok: map.qtyCok!==undefined ? pdsNum(row[map.qtyCok]) : 0, note:''};
+  ['defRattling','defRattling4','defDak45','defTokAuto','defSwinging','defSizzling','defScreaming','defBacklash','defHumming','defFunctionNok','defCreaking','defUnidentified','defEtc'].forEach(function(k){
+    if(map[k]!==undefined){ var v = pdsNum(row[map[k]]); if(v) rec[k] = v; }
+  });
+  // NOK가 비어 있으면 검사수량-OK로 보정
+  if(!rec.qtyNok && rec.qtyInspected && rec.qtyOk && rec.qtyInspected>rec.qtyOk+rec.qtyCok){ rec.qtyNok = rec.qtyInspected-rec.qtyOk-rec.qtyCok; }
+  return rec;
+}
+function pdsNormSheetName(n){ return String(n||'').replace(/\s+/g,'').toLowerCase(); }
+
 var PDS_IMPORT_SHEETS = [
-  {name:'RS4 Daily PDS입력란', target:'inspectionLog', dateKey:'inspDate', parse:parseRs4Row, idPrefix:'PD'},
-  {name:'JG Daily PDS입력란', target:'inspectionLog', dateKey:'inspDate', parse:parseJgDailyRow, idPrefix:'PD'},
-  {name:'JG 재검사 PDS입력란', target:'inspectionLog', dateKey:'inspDate', parse:parseJgReRow, idPrefix:'PD'},
+  {name:'RS4 Daily PDS입력란', match:function(n){ n=pdsNormSheetName(n); return n.indexOf('rs4')>-1 && n.indexOf('rs4pe')===-1 && n.indexOf('재검사')===-1; }, headerLine:'RS4', target:'inspectionLog', dateKey:'inspDate', idPrefix:'PD'},
+  {name:'JG Daily PDS입력란', match:function(n){ n=pdsNormSheetName(n); return n.indexOf('jg')>-1 && n.indexOf('재검사')===-1; }, headerLine:'JG 신검사', target:'inspectionLog', dateKey:'inspDate', idPrefix:'PD'},
+  {name:'JG 재검사 PDS입력란', match:function(n){ n=pdsNormSheetName(n); return n.indexOf('jg')>-1 && n.indexOf('재검사')>-1; }, headerLine:'JG 재검사', target:'inspectionLog', dateKey:'inspDate', idPrefix:'PD'},
+  {name:'RS4 PE Daily PDS입력란', match:function(n){ n=pdsNormSheetName(n); return n.indexOf('rs4pe')>-1 && n.indexOf('재검사')===-1; }, headerLine:'RS4 PE', target:'inspectionLog', dateKey:'inspDate', idPrefix:'PD'},
+  {name:'RS4 PE 재검사 PDS입력란', match:function(n){ n=pdsNormSheetName(n); return n.indexOf('rs4pe')>-1 && n.indexOf('재검사')>-1; }, headerLine:'RS4 PE 재검사', target:'inspectionLog', dateKey:'inspDate', idPrefix:'PD'},
   {name:'입고품', target:'pdsIncoming', dateKey:'date', parse:parseDeliveryRow, idPrefix:'PDIN'},
   {name:'출하', target:'pdsShipment', dateKey:'date', parse:parseDeliveryRow, idPrefix:'PDSH'},
   {name:'Shipback', target:'pdsShipback', dateKey:'date', parse:parseDeliveryRow, idPrefix:'PDSB'}
@@ -2742,7 +2840,21 @@ function bulkPersistNewRecords(target, records, onProgress){
   return p;
 }
 
-function importPdsWorkbook(file){
+function bulkDeleteRecords(target, ids, onProgress){
+  var CHUNK = 400, p = Promise.resolve(), done = 0;
+  for(var i=0;i<ids.length;i+=CHUNK){
+    (function(chunk){
+      p = p.then(function(){
+        var batch = fbDb.batch();
+        chunk.forEach(function(id){ batch.delete(fbDb.collection(target).doc(id)); });
+        return withSaveTimeout(batch.commit().then(function(){ return fbDb.waitForPendingWrites(); }));
+      }).then(function(){ done += chunk.length; if(onProgress){ onProgress(done, ids.length); } });
+    })(ids.slice(i,i+CHUNK));
+  }
+  return p;
+}
+
+function importPdsWorkbook(file, replaceMode){
   if(isGuest){ showToast('게스트 계정은 조회만 가능합니다. 수정하려면 품질팀 계정으로 로그인해주세요.'); return; }
   if(typeof XLSX === 'undefined'){ showToast('엑셀 처리 라이브러리를 불러오지 못했습니다. 새로고침 후 다시 시도해주세요.'); return; }
   var reader = new FileReader();
@@ -2754,18 +2866,45 @@ function importPdsWorkbook(file){
       var cutoff = cutoffYear+'-01-01';
       var byTarget = {}; // target -> parsed records
       var sheetsFound = 0, skippedOld = 0;
+      // 이미 등록된 행은 다시 가져오지 않도록(중복 방지) 내용 기준 지문을 만든다.
+      function fp(target, r){
+        if(target==='inspectionLog'){ return ['L',r.line,r.inspDate,r.workerName,r.category,r.doorName,r.lotNo,r.qtyInspected,r.qtyOk,r.qtyNok].join('|'); }
+        return ['D',r.date,r.doorNum,r.doorName,r.qty,r.note].join('|');
+      }
+      var seen = {};
+      (replaceMode ? [] : ['inspectionLog','pdsIncoming','pdsShipment','pdsShipback']).forEach(function(t){
+        (state[t]||[]).forEach(function(r){ var kk = t+'#'+fp(t,r); seen[kk] = (seen[kk]||0)+1; });
+      });
+      var skippedDup = 0;
+      var usedSheets = {};
       PDS_IMPORT_SHEETS.forEach(function(sc){
-        var sheet = wb.Sheets[sc.name];
-        if(!sheet) return;
+        var sheetName = null;
+        if(sc.match){
+          wb.SheetNames.forEach(function(n){ if(!sheetName && !usedSheets[n] && sc.match(n)){ sheetName = n; } });
+        } else if(wb.Sheets[sc.name]){ sheetName = sc.name; }
+        if(!sheetName) return;
+        usedSheets[sheetName] = true;
+        var sheet = wb.Sheets[sheetName];
         sheetsFound++;
         var matrix = XLSX.utils.sheet_to_json(sheet, {header:1, defval:null});
         if(!byTarget[sc.target]) byTarget[sc.target] = [];
-        for(var i=2; i<matrix.length; i++){
+        var startRow = 2, hmap = null;
+        if(sc.headerLine){
+          for(var hi=0; hi<Math.min(8, matrix.length); hi++){
+            var cand = pdsHeaderMap(matrix[hi]);
+            if(cand.inspDate!==undefined && cand.qtyInspected!==undefined){ hmap = cand; startRow = hi+1; break; }
+          }
+          if(!hmap){ return; }
+        }
+        for(var i=startRow; i<matrix.length; i++){
           var row = matrix[i];
           if(!row) continue;
-          var parsed = sc.parse(row);
+          var parsed = sc.headerLine ? parseByHeaderRow(row, hmap, sc.headerLine) : sc.parse(row);
           if(!parsed) continue;
-          if(parsed[sc.dateKey] && parsed[sc.dateKey] < cutoff){ skippedOld++; continue; }
+          if(!parsed[sc.dateKey]){ continue; } // 날짜 없는 행(합계·메모 등)은 제외
+          if(parsed[sc.dateKey] < cutoff){ skippedOld++; continue; }
+          var k = sc.target+'#'+fp(sc.target, parsed);
+          if(seen[k]>0){ seen[k]--; skippedDup++; continue; }
           parsed.id = uid(sc.idPrefix);
           byTarget[sc.target].push(parsed);
         }
@@ -2773,16 +2912,30 @@ function importPdsWorkbook(file){
       if(sheetsFound===0){ showToast('PDS 시트를 찾을 수 없습니다. 파일을 확인해주세요.'); return; }
       var total = 0;
       Object.keys(byTarget).forEach(function(k){ total += byTarget[k].length; });
-      if(total===0){ showToast('가져올 데이터가 없습니다 ('+cutoffYear+'년 이후 데이터만 가져옵니다).'); return; }
+      if(total===0){ showToast('새로 가져올 데이터가 없습니다 ('+cutoffYear+'년 이후 데이터만 가져오며, 이미 등록된 행 '+skippedDup+'건은 제외됩니다).'); return; }
       var summary = Object.keys(byTarget).map(function(k){ return (MODULES[k]?MODULES[k].label:k)+' '+byTarget[k].length+'건'; }).join(', ');
+      var confirmMsg;
+      if(replaceMode){
+        var delSummary = Object.keys(byTarget).map(function(k){ return (MODULES[k]?MODULES[k].label:k)+' '+(state[k]||[]).length+'건'; }).join(', ');
+        confirmMsg = '현재 저장된 데이터('+delSummary+')를 모두 삭제하고, 엑셀의 '+cutoffYear+'년 이후 데이터 '+total+'건('+summary+')으로 교체합니다. '+
+          '화면에서 직접 입력한 행도 함께 삭제되며 되돌릴 수 없습니다. 계속할까요?';
+      } else {
+        confirmMsg = cutoffYear+'년 이후 데이터 '+total+'건을 가져옵니다 ('+summary+'). '+
+          '그 이전 과거 이력('+skippedOld+'건)과 이미 등록된 행('+skippedDup+'건)은 제외됩니다. 계속할까요?';
+      }
       showConfirm(
-        cutoffYear+'년 이후 데이터 '+total+'건을 가져옵니다 ('+summary+'). '+
-        '그 이전 과거 이력('+skippedOld+'건)은 제외됩니다. 계속할까요?',
+        confirmMsg,
         function(){
           showToast('가져오는 중입니다... (0/'+total+')');
           var targets = Object.keys(byTarget);
           var chain = Promise.resolve();
           targets.forEach(function(k){
+            if(replaceMode){
+              chain = chain.then(function(){
+                var ids = (state[k]||[]).map(function(r){ return r.id; });
+                return bulkDeleteRecords(k, ids, function(done, n){ showToast('기존 데이터 삭제 중입니다... ('+done+'/'+n+')'); });
+              }).then(function(){ state[k] = []; });
+            }
             chain = chain.then(function(){
               return bulkPersistNewRecords(k, byTarget[k], function(done, n){
                 showToast('가져오는 중입니다... ('+done+'/'+n+')');
