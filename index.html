@@ -3363,7 +3363,8 @@ function showBulkAssignModal(modKey){
     state[modKey].forEach(function(r){
       if(ids[r.id]){ r[nameKey]=nameVal; if(emailVal){ r[emailKey]=emailVal; } }
     });
-    persist();
+    if(isGuest){ showToast('게스트 계정은 조회만 가능합니다. 수정하려면 품질팀 계정으로 로그인해주세요.'); }
+    else { pendingSaveCount++; bulkPersistNewRecords(modKey, state[modKey].filter(function(r){return ids[r.id];})).catch(function(err){ console.error(err); showToast('저장 중 오류가 발생했습니다: '+((err&&err.message)||'')); }).finally(function(){ pendingSaveCount--; }); }
     renderMenu();
     var wasCount = rows.length;
     cleanup();
@@ -3860,7 +3861,7 @@ function handleExcelImport(modKey, file){
       var data = new Uint8Array(e.target.result);
       var wb = XLSX.read(data, {type:'array'});
       var matchKey = cfg.matchKey || 'equipNo';
-      var added = 0, updated = 0, sheetsFound = 0;
+      var added = 0, updated = 0, sheetsFound = 0, changedMap = {};
       sheetCfgs.forEach(function(sc){
         var sheet = wb.Sheets[sc.sheetName] || (sheetCfgs.length===1 ? wb.Sheets[wb.SheetNames[0]] : null);
         if(!sheet) return;
@@ -3878,20 +3879,31 @@ function handleExcelImport(modKey, file){
           }
           if(existingIdx>-1){
             state[modKey][existingIdx] = Object.assign({}, state[modKey][existingIdx], parsed);
+            changedMap[state[modKey][existingIdx].id] = state[modKey][existingIdx];
             updated++;
           } else {
             parsed.id = uid(m.idPrefix);
             state[modKey].unshift(parsed);
+            changedMap[parsed.id] = parsed;
             added++;
           }
         }
       });
       if(sheetsFound===0){ showToast('시트를 찾을 수 없습니다.'); return; }
       if(added===0 && updated===0){ showToast('가져올 데이터를 찾지 못했습니다. 파일 형식을 확인해주세요.'); return; }
-      persist();
+      if(isGuest){ showToast('게스트 계정은 조회만 가능합니다. 수정하려면 품질팀 계정으로 로그인해주세요.'); return; }
       renderMenu();
       rerenderModule(modKey);
-      showToast('엑셀 업로드 완료: 신규 '+added+'건, 업데이트 '+updated+'건');
+      // 전체 데이터를 다시 저장하면 화면이 멈추므로, 변경·추가된 건만 저장한다.
+      var changed = Object.keys(changedMap).map(function(k){ return changedMap[k]; }).filter(function(r){ return r && r.id; });
+      showToast('엑셀 저장 중... ('+changed.length+'건)');
+      pendingSaveCount++;
+      bulkPersistNewRecords(modKey, changed, function(d,t){ showToast('엑셀 저장 중... '+d+'/'+t); }).then(function(){
+        showToast('엑셀 업로드 완료: 신규 '+added+'건, 업데이트 '+updated+'건');
+      }).catch(function(err){
+        console.error(err);
+        showToast('저장 중 오류가 발생했습니다: '+((err&&err.message)||''));
+      }).finally(function(){ pendingSaveCount--; });
     }catch(err){
       showToast('엑셀 파일을 읽는 중 오류가 발생했습니다.');
     }
