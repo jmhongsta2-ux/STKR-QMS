@@ -1791,7 +1791,7 @@ var MODULES = {
       {key:'model', label:'차종', type:'text', placeholder:'예: GN7'},
       {key:'part', label:'부품', type:'select', options:['LOM','POWERISE','FEBI','PTGM','PDS'], required:true},
       {key:'symptomType', label:'클레임유형 - 현상', type:'select_other', options:['작동불량','이음/소음','외관','NTF','기타'], otherPlaceholder:'기타 현상을 입력하세요', required:true},
-      {key:'occurType', label:'클레임유형 - 발생구분', type:'select', options:['0km','3M','일반'], fallback:'일반', required:true},
+      {key:'occurType', label:'클레임유형 - 발생구분', type:'select_other', options:['0km','3M','일반'], otherLabel:'일반', otherOptional:true, legacyOther:'기타', otherPlaceholder:'세부 발생구분을 입력하세요 (선택, 비워두면 "일반"으로 저장)', required:true},
       {key:'count', label:'건수', type:'number', value:1, min:0, step:1, placeholder:'예: 3'},
       {key:'severity', label:'심각도', type:'select', options:['경미','중','중대']},
       {key:'status', label:'상태', type:'select', options:['접수','조사중','8D진행','종결'], required:true},
@@ -3702,9 +3702,11 @@ function openModal(modKey, id){
       f.options.forEach(function(o){ html += '<option value="'+o+'"'+(selVal===o?' selected':'')+'>'+o+'</option>'; });
       html += '</select>';
     } else if(f.type==='select_other'){
+      var oLbl = f.otherLabel||'기타';
+      if(f.legacyOther && String(val)===f.legacyOther) val = oLbl;
       var isCustomVal = val!=='' && f.options.indexOf(String(val))===-1;
       html += '<select id="f_'+f.key+'" data-select-other-key="'+f.key+'">';
-      f.options.forEach(function(o){ html += '<option value="'+o+'"'+((!isCustomVal && String(val)===o)?' selected':'')+(isCustomVal && o==='기타' ? ' selected':'')+'>'+o+'</option>'; });
+      f.options.forEach(function(o){ html += '<option value="'+o+'"'+((!isCustomVal && String(val)===o)?' selected':'')+(isCustomVal && o===oLbl ? ' selected':'')+'>'+o+'</option>'; });
       html += '</select>';
       html += '<input id="f_'+f.key+'_other" type="text" class="field-other-input" placeholder="'+escAttr(f.otherPlaceholder||'기타 내용을 입력하세요')+'" value="'+(isCustomVal?escAttr(String(val)):'')+'" style="margin-top:6px;'+(isCustomVal?'':'display:none;')+'">';
     } else if(f.type==='textarea'){
@@ -3730,9 +3732,12 @@ function openModal(modKey, id){
   Array.prototype.forEach.call(body.querySelectorAll('[data-select-other-key]'), function(sel){
     var otherInput = document.getElementById('f_'+sel.getAttribute('data-select-other-key')+'_other');
     if(!otherInput) return;
+    var oKey = sel.getAttribute('data-select-other-key');
+    var oF = m.fields.filter(function(x){return x.key===oKey;})[0] || {};
+    var oLbl2 = oF.otherLabel||'기타';
     sel.addEventListener('change', function(){
-      otherInput.style.display = (sel.value==='기타') ? '' : 'none';
-      if(sel.value!=='기타'){ otherInput.value=''; }
+      otherInput.style.display = (sel.value===oLbl2) ? '' : 'none';
+      if(sel.value!==oLbl2){ otherInput.value=''; }
     });
   });
 
@@ -3906,11 +3911,11 @@ function saveModal(){
     var el = document.getElementById('f_'+f.key);
     var v = el ? el.value : '';
     if(f.type==='number'){ v = v===''?'':parseFloat(v); }
-    if(f.type==='select_other' && v==='기타'){
+    if(f.type==='select_other' && v===(f.otherLabel||'기타')){
       var otherEl = document.getElementById('f_'+f.key+'_other');
       var otherVal = otherEl ? otherEl.value.trim() : '';
       if(otherVal){ v = otherVal; }
-      else { missing.push(f.label+'(기타 내용 입력)'); }
+      else if(!f.otherOptional){ missing.push(f.label+'(기타 내용 입력)'); }
     }
     if(f.required && (v===''||v===undefined||v===null)){ missing.push(f.label); }
     data[f.key] = v;
