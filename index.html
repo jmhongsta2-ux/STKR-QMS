@@ -1565,7 +1565,7 @@ function buildClaimsReportHtml(){
       '<td>'+escHtml(r.model)+'</td>'+
       '<td>'+escHtml(r.part)+'</td>'+
       '<td>'+escHtml(r.symptomType)+'</td>'+
-      '<td>'+escHtml(r.occurType)+'</td>'+
+      '<td>'+escHtml(r.occurType==='기타'?'일반':r.occurType)+'</td>'+
       '<td>'+escHtml(r.severity)+'</td>'+
       '<td>'+escHtml(r.status)+'</td>'+
       '<td>'+owner+'</td>'+
@@ -1768,7 +1768,7 @@ var MODULES = {
     statusField:'status', statusFilters:['전체','접수','조사중','8D진행','종결'],
     yearFilterField:'date',
     dateRangeFilter:true, dateRangeLabel:'접수일',
-    extraFilterField:'occurType', extraFilterLabel:'발생구분', extraFilterOptions:['전체','0km','3M','기타'], extraKnown:['0km','3M'],
+    extraFilterField:'occurType', extraFilterLabel:'발생구분', extraFilterOptions:['전체','0km','3M','일반'], extraKnown:['0km','3M'],
     countField:'count',
     columns:[
       {key:'id', label:'클레임번호', cls:'mono cell-strong'},
@@ -1777,7 +1777,7 @@ var MODULES = {
       {key:'model', label:'차종'},
       {key:'part', label:'부품', render:function(r){return badge(r.part);}},
       {key:'symptomType', label:'현상', render:function(r){return badge(r.symptomType);}},
-      {key:'occurType', label:'발생구분', render:function(r){return badge(r.occurType);}},
+      {key:'occurType', label:'발생구분', render:function(r){return badge(r.occurType==='기타'?'일반':r.occurType);}},
       {key:'count', label:'건수', align:'right', render:function(r){return (r.count===undefined||r.count===''||r.count===null)?'<span class="cell-muted">-</span>':String(r.count);}},
       {key:'severity', label:'심각도', render:function(r){return badge(r.severity);}},
       {key:'status', label:'상태', render:function(r){return badge(r.status);}},
@@ -1789,9 +1789,9 @@ var MODULES = {
       {key:'date', label:'접수일', type:'date', required:true},
       {key:'customer', label:'고객사', type:'text', value:'HMC(현대자동차)'},
       {key:'model', label:'차종', type:'text', placeholder:'예: GN7'},
-      {key:'part', label:'부품', type:'select', options:['LOM','POWERISE','FEBI','PTGM'], required:true},
+      {key:'part', label:'부품', type:'select', options:['LOM','POWERISE','FEBI','PTGM','PDS'], required:true},
       {key:'symptomType', label:'클레임유형 - 현상', type:'select_other', options:['작동불량','이음/소음','외관','NTF','기타'], otherPlaceholder:'기타 현상을 입력하세요', required:true},
-      {key:'occurType', label:'클레임유형 - 발생구분', type:'select_other', options:['0km','3M','기타'], otherPlaceholder:'기타 발생구분을 직접 입력하세요', required:true},
+      {key:'occurType', label:'클레임유형 - 발생구분', type:'select', options:['0km','3M','일반'], fallback:'일반', required:true},
       {key:'count', label:'건수', type:'number', value:1, min:0, step:1, placeholder:'예: 3'},
       {key:'severity', label:'심각도', type:'select', options:['경미','중','중대']},
       {key:'status', label:'상태', type:'select', options:['접수','조사중','8D진행','종결'], required:true},
@@ -1814,7 +1814,7 @@ var MODULES = {
       saveBody: function(r,isNew){
         return (r.ownerName||'담당자')+'님,\n\n클레임 건이 '+(isNew?'배정':'업데이트')+'되었습니다.\n\n'+
           '- 클레임번호: '+r.id+'\n- 고객사: '+(r.customer||'-')+'\n- 차종: '+(r.model||'-')+'\n- 부품: '+(r.part||'-')+
-          '\n- 클레임유형(현상): '+(r.symptomType||'-')+'\n- 클레임유형(발생구분): '+(r.occurType||'-')+'\n- 건수: '+((r.count===undefined||r.count==='')?'-':r.count)+
+          '\n- 클레임유형(현상): '+(r.symptomType||'-')+'\n- 클레임유형(발생구분): '+(r.occurType==='기타'?'일반':(r.occurType||'-'))+'\n- 건수: '+((r.count===undefined||r.count==='')?'-':r.count)+
           '\n- 심각도: '+(r.severity||'-')+'\n- 목표종결일: '+(r.dueDate||'-')+'\n- 현재 상태: '+(r.status||'-')+
           (r.desc?('\n\n[상세내용]\n'+r.desc):'')+'\n\n확인 부탁드립니다.';
       }
@@ -3309,7 +3309,7 @@ function filteredRowsFor(modKey){
     }
     var matchE = true;
     if(m.extraFilterField && ui.extra && ui.extra!=='전체'){
-      if(m.extraKnown && ui.extra==='기타'){ matchE = m.extraKnown.indexOf(r[m.extraFilterField])===-1; }
+      if(m.extraKnown && ui.extra==='일반'){ matchE = m.extraKnown.indexOf(r[m.extraFilterField])===-1; }
       else { matchE = r[m.extraFilterField]===ui.extra; }
     }
     var matchD = true;
@@ -3698,7 +3698,8 @@ function openModal(modKey, id){
     html += '<div class="field'+(f.full?' full':'')+'"><label for="f_'+f.key+'">'+f.label+(f.required?' *':'')+'</label>';
     if(f.type==='select'){
       html += '<select id="f_'+f.key+'">';
-      f.options.forEach(function(o){ html += '<option value="'+o+'"'+(String(val)===o?' selected':'')+'>'+o+'</option>'; });
+      var selVal = (f.fallback && f.options.indexOf(String(val))===-1 && String(val)!=='') ? f.fallback : String(val);
+      f.options.forEach(function(o){ html += '<option value="'+o+'"'+(selVal===o?' selected':'')+'>'+o+'</option>'; });
       html += '</select>';
     } else if(f.type==='select_other'){
       var isCustomVal = val!=='' && f.options.indexOf(String(val))===-1;
