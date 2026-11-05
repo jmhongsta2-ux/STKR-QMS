@@ -2331,6 +2331,8 @@ var MODULES = {
       {key:'defRattling', label:'NOK유형 - Rattling', type:'number'},
       {key:'defRattling35', label:'NOK유형 - 3.5 Rattling', type:'number'},
       {key:'defRattling4', label:'NOK유형 - 4 Rattling', type:'number'},
+      {key:'defRattling45', label:'NOK유형 - 4.5 Rattling', type:'number'},
+      {key:'defRattling5', label:'NOK유형 - 5 Rattling', type:'number'},
       {key:'defDak45', label:'NOK유형 - 4.5 Dak', type:'number'},
       {key:'defTokAuto', label:'NOK유형 - TOK(Automatic)', type:'number'},
       {key:'defSwinging', label:'NOK유형 - Swinging', type:'number'},
@@ -2354,13 +2356,13 @@ var MODULE_ORDER = ['claims','samples','suppliers','gauges','reliability','d8rep
    입력하고, 칸을 벗어나면(change) 즉시 그 레코드만 저장된다. */
 var PDS_LINE_TABS = [
   {key:'rs4', label:'RS4 Daily', line:'RS4', defects:['defRattling','defSwinging','defSizzling','defScreaming','defBacklash','defHumming','defFunctionNok','defCreaking','defEtc']},
-  {key:'jg', label:'JG Daily', line:'JG 신검사', defects:['defRattling4','defDak45','defTokAuto','defBacklash','defUnidentified']},
-  {key:'jgre', label:'JG 재검사', line:'JG 재검사', defects:['defRattling4','defDak45','defTokAuto','defBacklash']},
-  {key:'rs4pe', label:'RS4 PE Daily', line:'RS4 PE', defects:['defRattling4','defDak45','defTokAuto']},
-  {key:'rs4pere', label:'RS4 PE 재검사', line:'RS4 PE 재검사', defects:['defRattling4','defDak45','defTokAuto']}
+  {key:'jg', label:'JG Daily', line:'JG 신검사', defects:['defRattling4','defRattling45','defRattling5','defDak45','defTokAuto','defBacklash','defUnidentified']},
+  {key:'jgre', label:'JG 재검사', line:'JG 재검사', defects:['defRattling4','defRattling45','defRattling5','defDak45','defTokAuto','defBacklash']},
+  {key:'rs4pe', label:'RS4 PE Daily', line:'RS4 PE', defects:['defRattling4','defRattling45','defRattling5','defDak45','defTokAuto']},
+  {key:'rs4pere', label:'RS4 PE 재검사', line:'RS4 PE 재검사', defects:['defRattling4','defRattling45','defRattling5','defDak45','defTokAuto']}
 ];
 var PDS_DEFECT_LABELS = {
-  qtyCok:'3.5', defRattling:'Rattling', defRattling35:'3.5 Rattling', defRattling4:'4 Rattling', defDak45:'4.5 Dak', defTokAuto:'TOK(Automatic)', defSwinging:'Swinging', defSizzling:'Sizzling', defScreaming:'Screaming',
+  qtyCok:'3.5 Rattling (COK)', defRattling45:'4.5 Rattling', defRattling5:'5 Rattling', defRattling:'Rattling', defRattling35:'3.5 Rattling', defRattling4:'4 Rattling', defDak45:'4.5 Dak', defTokAuto:'TOK(Automatic)', defSwinging:'Swinging', defSizzling:'Sizzling', defScreaming:'Screaming',
   defBacklash:'Backlash', defHumming:'Humming', defFunctionNok:'Function NOK', defCreaking:'Creaking',
   defUnidentified:'식별불가', defEtc:'기타'
 };
@@ -2503,9 +2505,10 @@ function renderPdsDeliveryGrid(tabCfg){
    (사용자 확인: "차종분류는 진짜 차종 'JG 와 RS4' 두종류만"). Door Name은 별도
    필터 축으로 추가한다. */
 var pdsAnalysisFilter = {year:'전체', startDate:'', endDate:'', carModel:'전체', doorName:'전체'};
-var ALL_DEFECT_KEYS = ['defRattling','defRattling4','defDak45','defTokAuto','defSwinging','defSizzling','defScreaming','defBacklash','defHumming','defFunctionNok','defCreaking','defUnidentified','defEtc'];
+var pdsChartUnit = 'month'; // 'month' | 'day'
+var ALL_DEFECT_KEYS = ['defRattling','defRattling4','defRattling45','defRattling5','defDak45','defTokAuto','defSwinging','defSizzling','defScreaming','defBacklash','defHumming','defFunctionNok','defCreaking','defUnidentified','defEtc'];
 var PDS_DEFECT_COLORS = {
-  qtyCok:'#14b8a6', defRattling:'#2563eb', defRattling35:'#1d4ed8', defRattling4:'#60a5fa', defDak45:'#0ea5e9', defTokAuto:'#a855f7', defSwinging:'#dc2626', defSizzling:'#f59e0b', defScreaming:'#10b981',
+  qtyCok:'#14b8a6', defRattling45:'#3b82f6', defRattling5:'#1e40af', defRattling:'#2563eb', defRattling35:'#1d4ed8', defRattling4:'#60a5fa', defDak45:'#0ea5e9', defTokAuto:'#a855f7', defSwinging:'#dc2626', defSizzling:'#f59e0b', defScreaming:'#10b981',
   defBacklash:'#8b5cf6', defHumming:'#ec4899', defFunctionNok:'#06b6d4', defCreaking:'#84cc16',
   defUnidentified:'#f97316', defEtc:'#6b7280'
 };
@@ -2551,24 +2554,39 @@ function pdsMonthlyAgg(rows){
     return {month:m, insp:b.insp, ok:b.ok, nok:b.nok, rate: b.insp ? (b.nok/b.insp*100) : 0};
   });
 }
+function pdsDailyAgg(rows){
+  var byDay = {};
+  rows.forEach(function(r){
+    var d = r.inspDate; if(!d) return;
+    if(!byDay[d]) byDay[d] = {insp:0, ok:0, nok:0};
+    byDay[d].insp += parseFloat(r.qtyInspected)||0;
+    byDay[d].ok += parseFloat(r.qtyOk)||0;
+    byDay[d].nok += parseFloat(r.qtyNok)||0;
+  });
+  return Object.keys(byDay).sort().map(function(d){
+    var b = byDay[d];
+    return {month:d, insp:b.insp, ok:b.ok, nok:b.nok, rate: b.insp ? (b.nok/b.insp*100) : 0};
+  });
+}
 function pdsDefectBreakdown(rows){
   var totals = {};
-  ALL_DEFECT_KEYS.forEach(function(k){ totals[k]=0; });
-  rows.forEach(function(r){ ALL_DEFECT_KEYS.forEach(function(k){ totals[k] += parseFloat(r[k])||0; }); });
+  var keys = ['qtyCok'].concat(ALL_DEFECT_KEYS);
+  keys.forEach(function(k){ totals[k]=0; });
+  rows.forEach(function(r){ keys.forEach(function(k){ totals[k] += parseFloat(r[k])||0; }); });
   return totals;
 }
 
 /* 월별 검사수량(막대) + 불량률(선)을 한 차트에 같이 보여주는 간단한 SVG 콤보 차트.
    외부 차트 라이브러리 없이(오프라인 배포 파일이므로) 순수 SVG로 그린다. */
-function renderPdsComboChart(monthly){
-  var w = 760, h = 230, padL = 46, padR = 46, padT = 14, padB = 30;
+function renderPdsComboChart(monthly, isDaily){
+  var w = isDaily ? Math.max(760, monthly.length*24+92) : 760, h = 230, padL = 46, padR = 46, padT = 14, padB = isDaily ? 44 : 30;
   var innerW = w-padL-padR, innerH = h-padT-padB;
   var n = monthly.length;
   var maxInsp = Math.max.apply(null, monthly.map(function(d){ return d.insp; }).concat([1]));
   var maxRate = Math.max.apply(null, monthly.map(function(d){ return d.rate; }).concat([1]));
   var step = innerW/n;
   var bw = Math.max(6, Math.min(34, step*0.55));
-  var svg = '<svg viewBox="0 0 '+w+' '+h+'" width="100%" height="'+h+'" preserveAspectRatio="xMidYMid meet" style="overflow:visible;">';
+  var svg = '<svg viewBox="0 0 '+w+' '+h+'" width="'+(isDaily ? w : '100%')+'" height="'+h+'" preserveAspectRatio="xMidYMid meet" style="overflow:visible;">';
   // y-axis gridlines (검사수량 기준, 4단)
   for(var g=0; g<=4; g++){
     var gy = padT + innerH - (innerH*g/4);
@@ -2581,7 +2599,8 @@ function renderPdsComboChart(monthly){
     var x = padL + step*i + (step-bw)/2;
     var barH = maxInsp ? (d.insp/maxInsp*innerH) : 0;
     var y = padT + innerH - barH;
-    svg += '<rect x="'+x+'" y="'+y+'" width="'+bw+'" height="'+barH+'" fill="var(--accent)" opacity="0.78" rx="2"></rect>';
+    svg += '<rect x="'+x+'" y="'+y+'" width="'+bw+'" height="'+barH+'" fill="var(--accent)" opacity="0.78" rx="2"><title>'+d.month+' · 검사 '+d.insp.toLocaleString()+' · NOK '+d.nok.toLocaleString()+' · '+d.rate.toFixed(1)+'%</title></rect>';
+    if(isDaily && d.insp>0){ svg += '<text x="'+(x+bw/2)+'" y="'+(y-3)+'" font-size="8.5" text-anchor="middle" fill="var(--text,#334155)">'+Math.round(d.insp).toLocaleString()+'</text>'; }
   });
   // line (불량률 %, 별도 축 스케일)
   var pts = monthly.map(function(d, i){
@@ -2598,21 +2617,29 @@ function renderPdsComboChart(monthly){
   // x labels
   monthly.forEach(function(d, i){
     var x = padL + step*i + step/2;
-    svg += '<text x="'+x+'" y="'+(h-6)+'" font-size="9.5" text-anchor="middle" fill="var(--muted)">'+d.month+'</text>';
+    if(isDaily){
+      svg += '<text transform="translate('+x+','+(h-34)+') rotate(60)" font-size="9" text-anchor="start" fill="var(--muted)">'+d.month.slice(5)+'</text>';
+    } else {
+      svg += '<text x="'+x+'" y="'+(h-6)+'" font-size="9.5" text-anchor="middle" fill="var(--muted)">'+d.month+'</text>';
+    }
   });
   svg += '</svg>';
   return svg;
 }
 
 /* 불량유형별 비율 원형 차트 (SVG path 수동 계산, 외부 라이브러리 없음) */
+var PDS_PIE_STANDARD = ['qtyCok','defRattling4','defRattling45','defRattling5','defDak45','defTokAuto'];
 function renderPdsPieChart(totals){
-  var entries = ALL_DEFECT_KEYS.filter(function(k){ return totals[k]>0; }).map(function(k){ return {key:k, label:PDS_DEFECT_LABELS[k], val:totals[k]}; });
+  // 엑셀의 불량 유형 6종은 값이 0이어도 항상 범례에 표시하고, 그 외 유형(RS4 등)은 값이 있을 때만 추가한다.
+  var shown = PDS_PIE_STANDARD.concat(ALL_DEFECT_KEYS.filter(function(k){ return PDS_PIE_STANDARD.indexOf(k)<0 && totals[k]>0; }));
+  var entries = shown.map(function(k){ return {key:k, label:PDS_DEFECT_LABELS[k], val:totals[k]||0}; });
   var sum = entries.reduce(function(a,e){ return a+e.val; }, 0);
   if(!sum){ return '<p class="panel-sub" style="margin:0;">표시할 불량 데이터가 없습니다.</p>'; }
   var cx=100, cy=100, r=92;
   var startAngle = -90;
   var svg = '<svg viewBox="0 0 200 200" width="200" height="200" style="flex-shrink:0;">';
   entries.forEach(function(e){
+    if(!e.val) return;
     var pct = e.val/sum;
     var angle = pct*360;
     var endAngle = startAngle+angle;
@@ -2673,15 +2700,20 @@ function renderPdsStatus(){
   html += '</div>';
 
   var scopeLabel = (f.carModel==='전체' ? '전체 차종 통합' : f.carModel) + (f.doorName!=='전체' ? ' · '+f.doorName : '');
-  var monthly = pdsMonthlyAgg(rows);
-  html += '<div class="pds-chart-wrap"><h3 style="margin:0 0 4px;font-size:14px;">월별 검사수량 및 불량률 · '+escHtml(scopeLabel)+'</h3>';
+  var isDaily = pdsChartUnit==='day';
+  var monthly = isDaily ? pdsDailyAgg(rows) : pdsMonthlyAgg(rows);
+  html += '<div class="pds-chart-wrap"><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:4px;"><h3 style="margin:0;font-size:14px;">'+(isDaily?'일별':'월별')+' 검사수량 및 불량률 · '+escHtml(scopeLabel)+'</h3>';
+  html += '<span class="seg" style="display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;">';
+  html += '<button type="button" class="btn sm" data-pds-unit="month" style="border:0;border-radius:0;'+(!isDaily?'background:var(--accent);color:#fff;':'')+'">월별</button>';
+  html += '<button type="button" class="btn sm" data-pds-unit="day" style="border:0;border-radius:0;'+(isDaily?'background:var(--accent);color:#fff;':'')+'">일별</button></span></div>';
   html += '<div style="display:flex;gap:14px;font-size:11px;color:var(--muted);margin-bottom:6px;"><span><span style="display:inline-block;width:9px;height:9px;background:var(--accent);border-radius:2px;margin-right:4px;"></span>검사수량(막대, 좌측 축)</span><span><span style="display:inline-block;width:9px;height:9px;background:var(--critical,#dc2626);border-radius:50%;margin-right:4px;"></span>불량률%(선, 우측 축)</span></div>';
-  html += monthly.length ? renderPdsComboChart(monthly) : '<p class="panel-sub" style="margin:0;">표시할 데이터가 없습니다.</p>';
+  html += monthly.length ? (isDaily ? '<div style="overflow-x:auto;padding-bottom:6px;">'+renderPdsComboChart(monthly, true)+'</div>' : renderPdsComboChart(monthly, false)) : '<p class="panel-sub" style="margin:0;">표시할 데이터가 없습니다.</p>';
   html += '</div>';
 
   var defectTotals = pdsDefectBreakdown(rows);
   html += '<div class="pds-chart-wrap"><h3 style="margin:0 0 12px;font-size:14px;">불량유형별 비율 · '+escHtml(scopeLabel)+'</h3>';
   html += '<div style="display:flex;gap:28px;align-items:center;flex-wrap:wrap;">'+renderPdsPieChart(defectTotals)+'</div>';
+  html += '<p class="panel-sub" style="margin:10px 0 0;font-size:11.5px;">※ 3.5 Rattling (COK)는 조건부 OK로, 상단 NOK수량·불량률에는 포함되지 않습니다.</p>';
   html += '</div>';
 
   var byModel = {};
@@ -2837,6 +2869,8 @@ function pdsHeaderMap(headerRow){
     else if(/^nok/.test(t)) key='qtyNok';
     else if(/\+/.test(t) || /불량률|total/.test(t)) key=null;
     else if(/^3\.5/.test(t)) key='qtyCok';
+    else if(/^4\.5 ?rattling/.test(t)) key='defRattling45';
+    else if(/^5 ?rattling/.test(t)) key='defRattling5';
     else if(/^4\.5/.test(t)) key='defDak45';
     else if(/^tok/.test(t)) key='defTokAuto';
     else if(/^4 ?rattling/.test(t)) key='defRattling4';
@@ -2863,13 +2897,13 @@ function parseByHeaderRow(row, map, line){
     lotNo: map.lotNo!==undefined ? pdsStr(row[map.lotNo]) : '',
     qtyInspected: pdsNum(row[map.qtyInspected]), qtyOk: pdsNum(row[map.qtyOk]), qtyNok: pdsNum(row[map.qtyNok]),
     qtyCok: map.qtyCok!==undefined ? pdsNum(row[map.qtyCok]) : 0, note:''};
-  ['defRattling','defRattling4','defDak45','defTokAuto','defSwinging','defSizzling','defScreaming','defBacklash','defHumming','defFunctionNok','defCreaking','defUnidentified','defEtc'].forEach(function(k){
+  ALL_DEFECT_KEYS.forEach(function(k){
     if(map[k]!==undefined){ var v = pdsNum(row[map[k]]); if(v) rec[k] = v; }
   });
   // NOK가 비어 있으면 검사수량-OK로 보정
   // NOK = 3.5(COK)·Inspected·OK를 제외한 모든 불량 항목(4 Rattling, 4.5 Dak, TOK 등)의 합. 항목 값이 없으면 엑셀 NOK Qty 열 사용.
   var dsum = 0;
-  ['defRattling','defRattling4','defDak45','defTokAuto','defSwinging','defSizzling','defScreaming','defBacklash','defHumming','defFunctionNok','defCreaking','defUnidentified','defEtc'].forEach(function(k){ dsum += rec[k]||0; });
+  ALL_DEFECT_KEYS.forEach(function(k){ dsum += rec[k]||0; });
   if(dsum>0){ rec.qtyNok = dsum; }
   else if(!rec.qtyNok && rec.qtyInspected && rec.qtyOk && rec.qtyInspected>rec.qtyOk+rec.qtyCok){ rec.qtyNok = rec.qtyInspected-rec.qtyOk-rec.qtyCok; }
   return rec;
@@ -4206,6 +4240,8 @@ document.addEventListener('DOMContentLoaded', function(){
       deleteRow(pdsDelBtn.getAttribute('data-pds-modkey'), pdsDelBtn.getAttribute('data-pds-del'));
       return;
     }
+    var pdsUnitEl = e.target.closest ? e.target.closest('[data-pds-unit]') : null;
+    if(pdsUnitEl){ pdsChartUnit = pdsUnitEl.getAttribute('data-pds-unit')==='day' ? 'day' : 'month'; renderPdsStatus(); return; }
     var pdsFilterResetBtn = e.target.closest ? e.target.closest('[data-pds-filter-reset]') : null;
     if(pdsFilterResetBtn){
       pdsAnalysisFilter = {year:'전체', startDate:'', endDate:'', carModel:'전체', doorName:'전체'};
@@ -4280,7 +4316,7 @@ var I18N_DICT = {
 '예: 홍길동':'e.g. Gildong Hong','예: 품질팀':'e.g. Quality Team','검색 (부품, 담당자, 번호 등)':'Search (part, owner, number, etc.)',
 '명부에서 자동완성됩니다':'Auto-completed from directory','명부에서 선택하세요':'Select from directory','미입력':'Not entered','기타':'Other',
 '기타 내용을 입력하세요':'Enter other details','기타 발생구분을 직접 입력하세요':'Enter other occurrence type','기타 현상을 입력하세요':'Enter other symptom',
-'GUEST':'GUEST','QMS 로그인':'QMS Login','게스트 계정은 조회만 가능합니다.':'Guest accounts are view-only.',
+'GUEST':'GUEST','월별 검사수량 및 불량률':'Monthly Inspected Qty & Defect Rate','일별 검사수량 및 불량률':'Daily Inspected Qty & Defect Rate','불량유형별 비율':'Defect Type Share','※ 3.5 Rattling (COK)는 조건부 OK로, 상단 NOK수량·불량률에는 포함되지 않습니다.':'* 3.5 Rattling (COK) is conditional OK and is not included in the NOK Qty / defect rate above.','QMS 로그인':'QMS Login','게스트 계정은 조회만 가능합니다.':'Guest accounts are view-only.',
 /* ---- dashboard ---- */
 '품질 현황을 한눈에 확인합니다 · 기준일':'Quality overview at a glance · As of','미종결 클레임':'Open Claims','진행중 8D 보고서':'8D Reports In Progress',
 '진행중 ISIR/4M 변경':'ISIR/4M Changes In Progress','임박 샘플납기(10일 이내)':'Upcoming Sample Deliveries (within 10 days)','점검필요 게이지':'Gauges Needing Attention',
