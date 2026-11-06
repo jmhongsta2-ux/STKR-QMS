@@ -1053,6 +1053,27 @@ function persist(){
    else's unrelated record. persist() is kept for genuinely bulk actions
    (Excel import, merging in a shared file, initial seeding) where many
    records are meant to change in the same action. */
+// 맵 형태 데이터(문서 위치, 협력사 평가 코멘트 등) 1건만 저장 — 전체 persist()는 데이터가 많으면 화면이 멈춘다.
+function persistMap(k){
+  if(isGuest){
+    showToast('게스트 계정은 조회만 가능합니다. 수정하려면 품질팀 계정으로 로그인해주세요.');
+    return Promise.resolve();
+  }
+  var payload = {
+    map: state[k] || {},
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    updatedBy: (currentUser && currentUser.email) || ''
+  };
+  if(JSON.stringify(payload).length > MAX_DOC_BYTES){
+    showToast('용량이 너무 커서 저장되지 않았습니다: '+k);
+    return Promise.resolve();
+  }
+  pendingSaveCount++;
+  return withSaveTimeout(fbDb.collection(FS_COLL).doc(k).set(payload).then(function(){ return fbDb.waitForPendingWrites(); })).catch(function(err){
+    console.error(err);
+    showToast('저장 중 오류가 발생했습니다: ' + ((err && err.message) || ''));
+  }).finally(function(){ pendingSaveCount--; });
+}
 function persistRecord(modKey, record){
   if(isGuest){
     showToast('게스트 계정은 조회만 가능합니다. 수정하려면 품질팀 계정으로 로그인해주세요.');
@@ -2265,7 +2286,7 @@ var MODULES = {
   isir4m: {
     key:'isir4m', label:'ISIR / 4M 변경', icon:'change', idPrefix:'IS',
     sub:'ISIR(초도품 승인) 및 4M(Man·Machine·Material·Method) 변경 신청/승인 현황을 관리합니다.',
-    searchKeys:['id','partName','materialNo','customer','ownerName'],
+    searchKeys:['id','partName','materialNo','customer','customerContact','ownerName'],
     statusField:'status', statusFilters:['전체','신청중','고객승인대기','승인완료','반려'],
     yearFilterField:'applyDate',
     columns:[
@@ -2274,6 +2295,7 @@ var MODULES = {
       {key:'partName', label:'품명/변경내용', cls:'cell-strong'},
       {key:'materialNo', label:'품번(Material No.)'},
       {key:'customer', label:'고객사'},
+      {key:'customerContact', label:'고객사 담당자'},
       {key:'applyDate', label:'신청일', render:function(r){return ddayCell(r.applyDate);}},
       {key:'approveDate', label:'고객승인일'},
       {key:'status', label:'상태', render:function(r){return badge(r.status);}},
@@ -2285,6 +2307,7 @@ var MODULES = {
       {key:'partName', label:'품명/변경내용', type:'text', full:true, required:true},
       {key:'materialNo', label:'품번(Material No.)', type:'text'},
       {key:'customer', label:'고객사', type:'text', placeholder:'예: HMC(현대자동차)'},
+      {key:'customerContact', label:'고객사 담당자', type:'text'},
       {key:'reason', label:'변경사유/배경', type:'textarea', full:true},
       {key:'applyDate', label:'신청일', type:'date'},
       {key:'approveDate', label:'고객승인일', type:'date'},
@@ -3268,7 +3291,7 @@ function renderOverdueBanner(modKey, rows){
     var subjectFn = isOverdue ? mail.overdueSubject : mail.dueSoonSubject;
     var bodyFn = isOverdue ? mail.overdueBody : mail.dueSoonBody;
     var subject = encodeURIComponent(subjectFn(r,n));
-    var body = encodeURIComponent(bodyFn(r,n));
+    var body = encodeURIComponent(withMailFooter(bodyFn(r,n)));
     var mailHref = r[emailKey] ? ('mailto:'+r[emailKey]+'?subject='+subject+'&body='+body) : null;
     var label = r.part || r.name || r.equipNo || r.partName || r.title || '-';
     var html = '<div class="overdue-row">';
@@ -3562,7 +3585,7 @@ function showDocEditor(kind, key, label){
     var v = document.getElementById('docEditorLoc').value.trim();
     if(v){ state[mapKey][key] = v; }
     else { delete state[mapKey][key]; }
-    persist();
+    persistMap(mapKey);
     cleanup();
     renderSupplierStatus('supplierTabBody');
     showToast('저장되었습니다.');
@@ -3649,7 +3672,7 @@ function showEvalEditor(key, label){
     comment = document.getElementById('evalEditorComment').value;
     if(v || comment){ state.supplierEval[key] = { location: v, comment: comment }; }
     else { delete state.supplierEval[key]; }
-    persist();
+    persistMap('supplierEval');
     cleanup();
     renderSupplierStatus('supplierTabBody');
     showToast('저장되었습니다.');
@@ -3827,13 +3850,16 @@ function fmtFileSize(b){
   return (b/1024/1024).toFixed(2)+'MB';
 }
 
+var MAIL_FOOTER = '* 참고 - 본 메일은 QMS에서 발송하는 메일로 본 메일 발송인과는 무관함';
+function withMailFooter(body){ return String(body||'').replace(/\s+$/,'') + '\n\n' + MAIL_FOOTER; }
+
 function openMailDraft(modKey, r, isNew){
   var m = MODULES[modKey];
   if(!m.mail) return;
   var email = r[mailFieldName(m.mail,'email')];
   if(!email) return;
   var subject = encodeURIComponent(m.mail.saveSubject(r, isNew));
-  var body = encodeURIComponent(m.mail.saveBody(r, isNew));
+  var body = encodeURIComponent(withMailFooter(m.mail.saveBody(r, isNew)));
   window.location.href = 'mailto:'+email+'?subject='+subject+'&body='+body;
 }
 
