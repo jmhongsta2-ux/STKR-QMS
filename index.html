@@ -3405,6 +3405,19 @@ function renderList(modKey, containerId, hideHeader){
   var ui = listUIState[modKey];
   var rows = state[modKey];
   var filtered = filteredRowsFor(modKey);
+  if(ui.sortKey){
+    var sDir = ui.sortDir==='desc' ? -1 : 1, sK = ui.sortKey;
+    filtered = filtered.slice().sort(function(a,b){
+      var x = a[sK], y = b[sK];
+      var xe = (x===undefined||x===null||x===''), ye = (y===undefined||y===null||y==='');
+      if(xe && ye) return 0;
+      if(xe) return 1;           // 빈 값은 항상 뒤로
+      if(ye) return -1;
+      var nx = parseFloat(x), ny = parseFloat(y);
+      if(!isNaN(nx) && !isNaN(ny) && String(nx)===String(x).trim() && String(ny)===String(y).trim()) return (nx-ny)*sDir;
+      return String(x).localeCompare(String(y), 'ko', {numeric:true})*sDir;
+    });
+  }
 
   var html = '';
   if(!hideHeader){ html += '<h1 class="page-title">'+m.label+'</h1><p class="page-sub">'+m.sub+'</p>'; }
@@ -3450,7 +3463,11 @@ function renderList(modKey, containerId, hideHeader){
   }
 
   html += '<div class="table-wrap"><div class="table-scroll"><table><thead><tr><th style="width:34px;">#</th>';
-  m.columns.forEach(function(c){ html += '<th'+(c.align==='right'?' style="text-align:right;"':'')+'>'+c.label+'</th>'; });
+  m.columns.forEach(function(c){
+    var isS = ui.sortKey===c.key;
+    var arrow = isS ? (ui.sortDir==='desc'?' ▼':' ▲') : ' <span style="opacity:.3;">↕</span>';
+    html += '<th class="sortable-th" data-sortkey="'+c.key+'" title="클릭하여 정렬" style="cursor:pointer;user-select:none;white-space:nowrap;'+(c.align==='right'?'text-align:right;':'')+(isS?'color:var(--accent);':'')+'">'+c.label+arrow+'</th>';
+  });
   html += '<th style="text-align:right;">관리</th></tr></thead><tbody>';
 
   filtered.forEach(function(r, idx){
@@ -3482,6 +3499,15 @@ function renderList(modKey, containerId, hideHeader){
 
   document.getElementById(containerId).innerHTML = html;
 
+  Array.prototype.forEach.call(document.getElementById(containerId).querySelectorAll('th.sortable-th'), function(th){
+    th.addEventListener('click', function(){
+      var k = th.getAttribute('data-sortkey');
+      if(ui.sortKey!==k){ ui.sortKey = k; ui.sortDir = 'asc'; }
+      else if(ui.sortDir==='asc'){ ui.sortDir = 'desc'; }
+      else { ui.sortKey = ''; ui.sortDir = 'asc'; }   // 세 번째 클릭: 정렬 해제(원래 순서)
+      renderList(modKey, containerId, hideHeader);
+    });
+  });
   document.getElementById('listSearch').addEventListener('input', function(e){ ui.q = e.target.value; renderList(modKey, containerId, hideHeader); preserveFocus('listSearch'); });
   document.getElementById('listStatusFilter').addEventListener('change', function(e){ ui.status = e.target.value; renderList(modKey, containerId, hideHeader); });
   if(document.getElementById('listYearFilter')){
