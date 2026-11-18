@@ -726,6 +726,7 @@ var SEED = {
   d8reports: [],
   audits: [],
   isir4m: [],
+  qualityIssues: [],
   inspectionLog: [],
   pdsIncoming: [],
   pdsShipment: [],
@@ -1671,7 +1672,7 @@ var STATUS_TONE = {
   '경미':'good','중':'warning',
   '적합':'good','부적합':'critical','교정예정':'warning','폐기':'neutral',
   '보류':'warning','전산등록':'accent','불필요':'neutral',
-  '신청중':'warning','고객승인대기':'accent','승인완료':'good','반려':'critical',
+  '신청중':'warning','고객승인대기':'accent','고객확인대기':'accent','승인완료':'good','반려':'critical',
   'RS4':'accent','RS4 PE':'accent','RS4 PE 재검사':'warning','JG 신검사':'neutral','JG 재검사':'warning'
 };
 function tone(v){ return STATUS_TONE[v] || 'neutral'; }
@@ -2321,6 +2322,39 @@ var MODULES = {
       {key:'attachment', label:'첨부파일 위치', type:'filelink', full:true}
     ]
   },
+  qualityIssues: {
+    key:'qualityIssues', label:'사내외 품질이슈', icon:'defect', idPrefix:'QI', detailView:true,
+    sub:'사내·사외 품질이슈를 등록하고 진행 상태를 관리합니다. 행을 클릭하면 상세 내용을 볼 수 있습니다.',
+    searchKeys:['id','customer','part','content','ownerName','customerContact'],
+    statusField:'status', statusFilters:['전체','접수','조치중','고객확인대기','종결'],
+    yearFilterField:'issueDate',
+    extraFilterField:'scope', extraFilterLabel:'구분', extraFilterOptions:['전체','사내','사외'],
+    columns:[
+      {key:'scope', label:'구분', render:function(r){return r.scope ? '<span class="badge '+(r.scope==='사외'?'b-accent':'b-neutral')+'">'+r.scope+'</span>' : '<span class="cell-muted">-</span>';}},
+      {key:'issueDate', label:'일자'},
+      {key:'customer', label:'고객사'},
+      {key:'part', label:'부품'},
+      {key:'content', label:'내용', cls:'cell-strong', render:function(r){var t=String(r.content||''); return t ? escHtml(t.length>40 ? t.slice(0,40)+'…' : t) : '<span class="cell-muted">-</span>';}},
+      {key:'severity', label:'심각도', render:function(r){return badge(r.severity);}},
+      {key:'status', label:'상태', render:function(r){return badge(r.status);}},
+      {key:'ownerName', label:'담당자'},
+      {key:'customerContact', label:'고객사 담당자'}
+    ],
+    fields:[
+      {key:'scope', label:'구분', type:'select', options:['사내','사외'], required:true},
+      {key:'issueDate', label:'일자', type:'date', required:true},
+      {key:'customer', label:'고객사', type:'text', placeholder:'예: HMC(현대자동차)'},
+      {key:'part', label:'부품', type:'text', placeholder:'부품명 또는 품번'},
+      {key:'content', label:'내용', type:'textarea', full:true, required:true, placeholder:'이슈 내용을 상세히 입력하세요'},
+      {key:'severity', label:'심각도', type:'select', options:['경미','중','중대']},
+      {key:'status', label:'상태', type:'select', options:['접수','조치중','고객확인대기','종결']},
+      {key:'ownerName', label:'담당자', type:'text', placeholder:'명부에서 자동완성됩니다', list:'staffNameList'},
+      {key:'ownerEmail', label:'담당자 이메일', type:'email', placeholder:'name@stabilus.com'},
+      {key:'customerContact', label:'고객사 담당자', type:'text'},
+      {key:'note', label:'비고 / 조치내용', type:'textarea', full:true},
+      {key:'attachment', label:'첨부파일 위치', type:'filelink', full:true}
+    ]
+  },
   inspectionLog: {
     key:'inspectionLog', label:'검사 일지(PDS)', icon:'inspect', idPrefix:'PD',
     sub:'PDS 라인(RS4/JG)의 일일 검사 실적과 NOK 유형별 수량을 관리합니다.',
@@ -2374,7 +2408,7 @@ var MODULES = {
     ]
   }
 };
-var MODULE_ORDER = ['claims','samples','suppliers','gauges','reliability','d8reports','audits','isir4m','inspectionLog'];
+var MODULE_ORDER = ['claims','qualityIssues','samples','suppliers','gauges','reliability','d8reports','audits','isir4m','inspectionLog'];
 
 /* ============================= PDS 검사일지 (탭형 엑셀 입력) =============================
    "검사 일지(PDS)" 메뉴는 generic renderList()/모달 대신, 원래 엑셀의 시트 구성을 그대로
@@ -3170,6 +3204,8 @@ function renderDashboard(){
   html += kpiCard('진행중 8D 보고서', active8D+'건', '전체 '+d.d8reports.length+'건 중', 'serious', 'd8reports');
   html += kpiCard('공급업체 Audit 계획일 초과', overdueAudits+'건', '감사 일정/이력의 2자심사(공급업체) '+supplierAudits.length+'건 중', overdueAudits>0?'critical':'good', 'audits');
   html += kpiCard('진행중 ISIR/4M 변경', openIsir4m+'건', '전체 '+d.isir4m.length+'건 중', openIsir4m>0?'warning':'good', 'isir4m');
+  var qiList = d.qualityIssues||[]; var openQi = qiList.filter(function(r){return r.status!=='종결';}).length;
+  html += kpiCard('진행중 사내외 품질이슈', openQi+'건', '전체 '+qiList.length+'건 중', openQi>0?'serious':'good', 'qualityIssues');
   html += '</div>';
 
   html += '<div class="panel-row">';
@@ -3851,6 +3887,15 @@ function renderList(modKey, containerId, hideHeader){
       document.getElementById('listDateClear').addEventListener('click', function(){ ui.from=''; ui.to=''; renderList(modKey, containerId, hideHeader); });
     }
   }
+  if(m.detailView){
+    Array.prototype.forEach.call(document.getElementById(containerId).querySelectorAll('tbody tr[data-id]'), function(tr){
+      tr.style.cursor = 'pointer';
+      tr.addEventListener('click', function(e){
+        if(e.target.closest && e.target.closest('.row-actions, a, button, input, select')) return;
+        openDetailModal(modKey, tr.getAttribute('data-id'));
+      });
+    });
+  }
   document.getElementById('btnAddRow').addEventListener('click', function(){ openModal(modKey, null); });
   if(modKey==='claims' && document.getElementById('btnClaimsReport')){
     document.getElementById('btnClaimsReport').addEventListener('click', downloadClaimsReport);
@@ -4056,7 +4101,41 @@ function rerenderModule(modKey){
 
 /* ============================= MODAL ============================= */
 var modalCtx = null;
+function resetModalFoot(){
+  var sv = document.getElementById('modalSave'); if(sv) sv.style.display = '';
+  var eb = document.getElementById('detailEditBtn'); if(eb && eb.parentNode) eb.parentNode.removeChild(eb);
+  var cn = document.getElementById('modalCancel'); if(cn) cn.textContent = '취소';
+}
+function openDetailModal(modKey, id){
+  var m = MODULES[modKey];
+  var r = state[modKey].filter(function(x){return x.id===id;})[0];
+  if(!r) return;
+  modalCtx = null;
+  resetModalFoot();
+  document.getElementById('modalTitle').textContent = m.label+' 상세 ('+r.id+')';
+  var html = '';
+  m.fields.forEach(function(f){
+    var v = r[f.key];
+    var inner;
+    if(v===undefined || v===null || v===''){ inner = '<span class="cell-muted">-</span>'; }
+    else if(f.key==='severity' || f.key==='status'){ inner = badge(v); }
+    else if(f.key==='scope'){ inner = '<span class="badge '+(v==='사외'?'b-accent':'b-neutral')+'">'+escHtml(v)+'</span>'; }
+    else if(f.type==='filelink'){ inner = fileLinkCell(v); }
+    else if(f.type==='textarea'){ inner = '<div style="white-space:pre-wrap;word-break:break-word;line-height:1.55;">'+escHtml(String(v))+'</div>'; }
+    else { inner = escHtml(String(v)); }
+    html += '<div class="field'+((f.full||f.type==='textarea')?' full':'')+'"><label>'+f.label+'</label><div style="padding:7px 0;border-bottom:1px solid var(--border,#e5e7eb);min-height:20px;">'+inner+'</div></div>';
+  });
+  document.getElementById('modalBody').innerHTML = html;
+  document.getElementById('modalSave').style.display = 'none';
+  document.getElementById('modalCancel').textContent = '닫기';
+  var eb = document.createElement('button');
+  eb.className = 'btn primary'; eb.id = 'detailEditBtn'; eb.textContent = '수정';
+  eb.addEventListener('click', function(){ closeModal(); openModal(modKey, id); });
+  document.getElementById('modalSave').parentNode.appendChild(eb);
+  document.getElementById('overlay').hidden = false;
+}
 function openModal(modKey, id){
+  resetModalFoot();
   var m = MODULES[modKey];
   var record = id ? state[modKey].find(function(r){return r.id===id;}) : null;
   modalCtx = {modKey:modKey, id:id};
@@ -4122,7 +4201,7 @@ function openModal(modKey, id){
     }
   }
 }
-function closeModal(){ document.getElementById('overlay').hidden = true; modalCtx = null; }
+function closeModal(){ document.getElementById('overlay').hidden = true; modalCtx = null; resetModalFoot(); }
 
 /* ============================= NAME AUTOCOMPLETE (담당자/공급업체 자동완성) =============================
    A native <input list="..."> + <datalist> was used previously, but Chrome fails to show the
@@ -4713,7 +4792,7 @@ var I18N_DICT = {
 /* ---- chrome / common ---- */
 '대시보드':'Dashboard','설정':'Settings','품질 업무':'Quality Operations','관리':'Management',
 '공급업체 관리':'Supplier Management','샘플 납기일정':'Sample Delivery Schedule','고객 클레임 현황':'Customer Claim Status',
-'고객 클레임 비용 분석':'Customer Claim Cost Analysis','공정별 불량 현황':'Process Defect Status','품질 KPI 대시보드':'Quality KPI Dashboard','정기 신뢰성 시험':'Periodic Reliability Test',
+'고객 클레임 비용 분석':'Customer Claim Cost Analysis','공정별 불량 현황':'Process Defect Status','품질 KPI 대시보드':'Quality KPI Dashboard','사내외 품질이슈':'Internal/External Quality Issues','정기 신뢰성 시험':'Periodic Reliability Test',
 '8D 보고서 관리':'8D Report Management','게이지 검교정':'Gauge Calibration','감사 일정/이력':'Audit Schedule / History',
 'ISIR / 4M 변경':'ISIR / 4M Change','검사 일지(PDS)':'Inspection Log (PDS)','검사 일지':'Inspection Log',
 '팀 공유용 파일로 저장':'Save as Team Share File','팀 공유용 파일로 저장 (배포)':'Save as Team Share File (Distribute)','팀 공유':'Team Share',
