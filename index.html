@@ -1811,10 +1811,10 @@ var MODULES = {
     ],
     fields:[
       {key:'date', label:'접수일', type:'date', required:true},
-      {key:'customer', label:'고객사', type:'text', value:'HMC(현대자동차)'},
+      {key:'customer', label:'고객사', type:'select_other', options:['HMC(현대자동차)','KMC(기아자동차)','기타'], value:'HMC(현대자동차)', otherPlaceholder:'고객사명을 입력하세요', required:true},
       {key:'model', label:'차종', type:'text', placeholder:'예: GN7'},
       {key:'part', label:'부품', type:'select', options:['LOM','POWERISE','FEBI','PTGM','PDS'], required:true},
-      {key:'symptomType', label:'클레임유형 - 현상', type:'select_other', options:['작동불량','이음/소음','외관','NTF','기타'], otherPlaceholder:'기타 현상을 입력하세요', required:true},
+      {key:'symptomType', label:'클레임유형 - 현상', type:'select_other', options:['작동불량','주행소음','작동소음','외관','NTF','기타'], otherPlaceholder:'기타 현상을 입력하세요', required:true},
       {key:'occurType', label:'클레임유형 - 발생구분', type:'select_other', options:['0km','3M','일반'], otherLabel:'일반', otherOptional:true, legacyOther:'기타', otherPlaceholder:'세부 발생구분을 입력하세요 (선택, 비워두면 "일반"으로 저장)', required:true},
       {key:'misMonths', label:'사용개월수 (MIS, 개월)', type:'number', min:0, step:1, placeholder:'예: 12 (0km는 0)'},
       {key:'count', label:'건수', type:'number', value:1, min:0, step:1, placeholder:'예: 3'},
