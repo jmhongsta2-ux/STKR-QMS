@@ -1990,6 +1990,7 @@ var MODULES = {
       hint:'"종합" 시트 형식의 정기 신뢰성 시험 파일을 업로드하면 회사/연도/월/품번 기준으로 자동 등록·업데이트됩니다.',
       sheetName:'종합',
       headerRowIndex:2,
+      ownerHeaderDetect:true,
       matchKey:'srcKey',
       parseRow:function(row){
         function s(v){ return (v===null||v===undefined) ? '' : String(v).trim(); }
@@ -4319,20 +4320,48 @@ function handleExcelImport(modKey, file){
         sheetsFound++;
         var matrix = XLSX.utils.sheet_to_json(sheet, {header:1, defval:null});
         var startIdx = sc.headerRowIndex || 0;
+        // 헤더에 '담당자'가 들어간 열(고객사 담당자 제외)이 있으면 사내 담당자로 자동 반영
+        var ownerCol = -1;
+        if(cfg.ownerHeaderDetect){
+          for(var hr=0; hr<Math.min(startIdx+1, matrix.length) && ownerCol<0; hr++){
+            var hrow = matrix[hr] || [];
+            for(var hc=0; hc<hrow.length; hc++){
+              var ht = String(hrow[hc]===null||hrow[hc]===undefined?'':hrow[hc]).replace(/\s+/g,'');
+              if(ht.indexOf('담당')>-1 && ht.indexOf('고객')===-1){ ownerCol = hc; break; }
+            }
+          }
+        }
         for(var i=startIdx; i<matrix.length; i++){
           var row = matrix[i];
           if(!row) continue;
           var parsed = sc.parseRow(row);
           if(!parsed) continue;
+          if(ownerCol===20){ parsed.note = (parsed.status==='불필요') ? String(row[14]||'').trim() : ''; }
+          if(ownerCol>-1){
+            var ownerRaw = row[ownerCol];
+            var ownerNm = (ownerRaw===null||ownerRaw===undefined) ? '' : String(ownerRaw).trim();
+            if(ownerNm){
+              parsed.ownerName = ownerNm;
+              var stf = (state.staff||[]).filter(function(x){return x.name===ownerNm;})[0];
+              parsed._ownerEmail = (stf && stf.email) ? stf.email : '';
+            }
+          }
           var existingIdx = -1;
           if(matchKey && parsed[matchKey]){
             existingIdx = state[modKey].findIndex(function(r){ return r[matchKey] === parsed[matchKey]; });
           }
+          var ownEmail = parsed._ownerEmail; delete parsed._ownerEmail;
           if(existingIdx>-1){
-            state[modKey][existingIdx] = Object.assign({}, state[modKey][existingIdx], parsed);
+            var oldRec = state[modKey][existingIdx];
+            if(parsed.ownerName){
+              if(ownEmail){ parsed.ownerEmail = ownEmail; }
+              else if(oldRec.ownerName !== parsed.ownerName){ parsed.ownerEmail = ''; }
+            }
+            state[modKey][existingIdx] = Object.assign({}, oldRec, parsed);
             changedMap[state[modKey][existingIdx].id] = state[modKey][existingIdx];
             updated++;
           } else {
+            if(parsed.ownerName && ownEmail){ parsed.ownerEmail = ownEmail; }
             parsed.id = uid(m.idPrefix);
             state[modKey].unshift(parsed);
             changedMap[parsed.id] = parsed;
