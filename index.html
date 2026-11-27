@@ -1991,6 +1991,7 @@ var MODULES = {
       sheetName:'종합',
       headerRowIndex:2,
       ownerHeaderDetect:true,
+      staleCleanup:true,
       matchKey:'srcKey',
       buildIndex:function(matrix){
         function nz(v){ return String(v===null||v===undefined?'':v).replace(/\s+/g,''); }
@@ -4337,7 +4338,7 @@ function handleExcelImport(modKey, file){
       var data = new Uint8Array(e.target.result);
       var wb = XLSX.read(data, {type:'array'});
       var matchKey = cfg.matchKey || 'equipNo';
-      var added = 0, updated = 0, sheetsFound = 0, changedMap = {};
+      var added = 0, updated = 0, sheetsFound = 0, changedMap = {}, seenKeys = {}, seenYears = {};
       sheetCfgs.forEach(function(sc){
         var sheet = wb.Sheets[sc.sheetName] || (sheetCfgs.length===1 ? wb.Sheets[wb.SheetNames[0]] : null);
         if(!sheet) return;
@@ -4366,8 +4367,13 @@ function handleExcelImport(modKey, file){
             var ownerRaw = row[ownerCol];
             var ownerNm = (ownerRaw===null||ownerRaw===undefined) ? '' : String(ownerRaw).trim();
             if(ownerNm){
+              var stfAll = state.staff||[];
+              var stf = stfAll.filter(function(x){return x.name===ownerNm;})[0];
+              if(!stf){
+                var cand = stfAll.filter(function(x){ return x.name && x.name.indexOf(ownerNm)===0 && /^\s/.test(x.name.slice(ownerNm.length)); });
+                if(cand.length===1) stf = cand[0];
+              }
               parsed.ownerName = ownerNm;
-              var stf = (state.staff||[]).filter(function(x){return x.name===ownerNm;})[0];
               parsed._ownerEmail = (stf && stf.email) ? stf.email : '';
             }
           }
@@ -4376,6 +4382,7 @@ function handleExcelImport(modKey, file){
             existingIdx = state[modKey].findIndex(function(r){ return r[matchKey] === parsed[matchKey]; });
           }
           var ownEmail = parsed._ownerEmail; delete parsed._ownerEmail;
+          if(parsed.srcKey){ seenKeys[parsed.srcKey] = true; seenYears[String(parsed.year)] = true; }
           if(existingIdx>-1){
             var oldRec = state[modKey][existingIdx];
             if(parsed.ownerName){
@@ -4405,6 +4412,15 @@ function handleExcelImport(modKey, file){
       pendingSaveCount++;
       bulkPersistNewRecords(modKey, changed, function(d,t){ showToast('엑셀 저장 중... '+d+'/'+t); }).then(function(){
         showToast('엑셀 업로드 완료: 신규 '+added+'건, 업데이트 '+updated+'건');
+        if(cfg.staleCleanup){
+          var stale = state[modKey].filter(function(r){ return r.srcKey && !seenKeys[r.srcKey] && seenYears[String(r.year)]; });
+          if(stale.length){
+            var delIds = {}; stale.forEach(function(r){ delIds[r.id]=true; });
+            state[modKey] = state[modKey].filter(function(r){ return !delIds[r.id]; });
+            renderMenu(); rerenderModule(modKey);
+            Promise.all(stale.map(function(r){ return persistDelete(modKey, r.id); })).then(function(){ showToast('엑셀에 없는 '+stale.length+'건을 삭제했습니다.'); });
+          }
+        }
       }).catch(function(err){
         console.error(err);
         showToast('저장 중 오류가 발생했습니다: '+((err&&err.message)||''));
