@@ -3420,10 +3420,14 @@ function arAgg(rows, keyFn){
   });
   return order.map(function(k){ return map[k]; });
 }
-function arData(year){
-  var rows = state.claims.filter(function(r){ return arYearOf(r)===String(year); });
-  var prev = state.claims.filter(function(r){ return arYearOf(r)===String(year-1); });
-  var d = {year:year, rows:rows, prevRows:prev};
+function arOccList(flt){ return flt==='0km' ? ['0km'] : flt==='3M' ? ['3M'] : flt==='0km+3M' ? ['0km','3M'] : AR_OCC; }
+function arFltLabel(flt){ return flt==='0km' ? '0km만' : flt==='3M' ? '3M만' : flt==='0km+3M' ? '0km + 3M (일반 제외)' : '전체'; }
+function arData(year, flt){
+  var occs = arOccList(flt);
+  var okOcc = function(r){ return occs.indexOf(occCategory(r.occurType))>-1; };
+  var rows = state.claims.filter(function(r){ return arYearOf(r)===String(year) && okOcc(r); });
+  var prev = state.claims.filter(function(r){ return arYearOf(r)===String(year-1) && okOcc(r); });
+  var d = {year:year, rows:rows, prevRows:prev, flt:flt||'전체', occs:occs};
   d.total = rows.reduce(function(a,r){return a+arCnt(r);},0);
   d.prevTotal = prev.reduce(function(a,r){return a+arCnt(r);},0);
   d.occ = {'0km':0,'3M':0,'일반':0};
@@ -3546,7 +3550,8 @@ function arPareto(items, opt){
   }
   return svg+'</svg>';
 }
-function arHeatTable(rowsAgg, topN){
+function arHeatTable(rowsAgg, topN, occs){
+  occs = occs||AR_OCC;
   var list = rowsAgg.slice(0, topN||999);
   var rest = rowsAgg.slice(topN||999);
   if(rest.length){
@@ -3554,22 +3559,22 @@ function arHeatTable(rowsAgg, topN){
     rest.forEach(function(x){ o.total+=x.total; o.n+=x.n; AR_OCC.forEach(function(k){ o[k]+=x[k]; }); });
     list = list.concat([o]);
   }
-  var mx = Math.max.apply(null, list.map(function(x){return Math.max(x['0km'],x['3M'],x['일반']);}).concat([1]));
-  var h = '<table class="tbl"><thead><tr><th>차종</th><th class="num">0km</th><th class="num">3M</th><th class="num">일반</th><th class="num">합계</th><th class="num">비중</th></tr></thead><tbody>';
+  var mx = Math.max.apply(null, list.map(function(x){return Math.max.apply(null, occs.map(function(k){return x[k];}));}).concat([1]));
+  var h = '<table class="tbl"><thead><tr><th>차종</th>'+occs.map(function(k){return '<th class="num">'+k+'</th>';}).join('')+'<th class="num">합계</th><th class="num">비중</th></tr></thead><tbody>';
   var gt = {'0km':0,'3M':0,'일반':0,total:0};
   rowsAgg.forEach(function(x){ AR_OCC.forEach(function(k){ gt[k]+=x[k]; }); gt.total += x.total; });
   list.forEach(function(x){
     h += '<tr><td>'+arEsc(x.key)+'</td>';
-    AR_OCC.forEach(function(k){ var a = x[k]/mx; h += '<td class="num" style="'+(x[k]?'background:rgba(37,99,235,'+(0.08+a*0.42).toFixed(2)+');':'color:#cbd5e1;')+'">'+(x[k]?arFmt(x[k]):'-')+'</td>'; });
+    occs.forEach(function(k){ var a = x[k]/mx; h += '<td class="num" style="'+(x[k]?'background:rgba(37,99,235,'+(0.08+a*0.42).toFixed(2)+');':'color:#cbd5e1;')+'">'+(x[k]?arFmt(x[k]):'-')+'</td>'; });
     h += '<td class="num b">'+arFmt(x.total)+'</td><td class="num mut">'+arPct(x.total, gt.total)+'</td></tr>';
   });
-  h += '<tr class="sum"><td>합계</td>'+AR_OCC.map(function(k){return '<td class="num">'+arFmt(gt[k])+'</td>';}).join('')+'<td class="num b">'+arFmt(gt.total)+'</td><td class="num">100%</td></tr></tbody></table>';
+  h += '<tr class="sum"><td>합계</td>'+occs.map(function(k){return '<td class="num">'+arFmt(gt[k])+'</td>';}).join('')+'<td class="num b">'+arFmt(gt.total)+'</td><td class="num">100%</td></tr></tbody></table>';
   return h;
 }
 function arInsights(d){
   var out = [];
   if(!d.total) return ['해당 연도에 등록된 클레임이 없습니다.'];
-  out.push(d.year+'년 클레임은 총 <b>'+arFmt(d.total)+'건</b>('+d.rows.length+'건 접수)이며, 발생구분별로는 0km '+arFmt(d.occ['0km'])+'건, 3M '+arFmt(d.occ['3M'])+'건, 일반 '+arFmt(d.occ['일반'])+'건입니다.');
+  out.push(d.year+'년 클레임'+(d.flt&&d.flt!=='전체'?'('+arFltLabel(d.flt)+' 기준)':'')+'은 총 <b>'+arFmt(d.total)+'건</b>('+d.rows.length+'건 접수)이며, 발생구분별로는 '+d.occs.map(function(k){return k+' '+arFmt(d.occ[k])+'건';}).join(', ')+'입니다.');
   if(d.prevTotal){ var df = d.total-d.prevTotal; out.push('전년('+(d.year-1)+'년) '+arFmt(d.prevTotal)+'건 대비 <b>'+(df>0?'+':'')+arFmt(df)+'건 ('+(df>0?'+':'')+Math.round(df/d.prevTotal*1000)/10+'%)</b> '+(df>0?'증가':df<0?'감소':'동일')+'했습니다.'); }
   var top = d.byModel[0]; if(top) out.push('불량이 가장 많은 차종은 <b>'+arEsc(top.key)+'</b>('+arFmt(top.total)+'건, 전체의 '+arPct(top.total,d.total)+')'+(d.byModel[1]?'이며, 다음은 '+arEsc(d.byModel[1].key)+'('+arFmt(d.byModel[1].total)+'건)입니다.':'입니다.'));
   var s = d.bySymptom[0]; if(s) out.push('현상별로는 <b>'+arEsc(s.key)+'</b>이(가) '+arFmt(s.total)+'건('+arPct(s.total,d.total)+')으로 가장 많습니다.');
@@ -3578,35 +3583,35 @@ function arInsights(d){
   out.push('종결 처리된 건은 '+d.closed+'건으로 접수 건 대비 종결률은 <b>'+arPct(d.closed,d.rows.length)+'</b>입니다.');
   return out;
 }
-function arBuildHtml(year){
-  var d = arData(year);
-  var occSeries = AR_OCC.map(function(k){ return {name:k, color:AR_OCC_COLOR[k], vals:d.months.map(function(m){return m[k];})}; });
+function arBuildHtml(year, flt){
+  var d = arData(year, flt), occs = d.occs;
+  var occSeries = occs.map(function(k){ return {name:k, color:AR_OCC_COLOR[k], vals:d.months.map(function(m){return m[k];})}; });
   var monthLabels = d.months.map(function(m){return m.m+'월';});
   var topModels = d.byModel.slice(0,12);
-  var hItems = topModels.map(function(x){ return {label:x.key, total:x.total, parts:AR_OCC.map(function(k){return {name:k, color:AR_OCC_COLOR[k], v:x[k]};})}; });
+  var hItems = topModels.map(function(x){ return {label:x.key, total:x.total, parts:occs.map(function(k){return {name:k, color:AR_OCC_COLOR[k], v:x[k]};})}; });
   var catDonut = function(list){ return list.map(function(x,i){ return {label:x.key, value:x.total, color:AR_PALETTE[i%AR_PALETTE.length]}; }); };
   var today = todayISO();
   var css = '*{box-sizing:border-box}body{font-family:"Malgun Gothic","Apple SD Gothic Neo",Arial,sans-serif;color:#0f172a;margin:0;padding:28px 34px;background:#fff;font-size:13px;line-height:1.5}'+
     'h1{font-size:24px;margin:0 0 2px}h2{font-size:16px;margin:26px 0 10px;padding-left:10px;border-left:4px solid #2563eb}.sub{color:#64748b;margin-bottom:18px}'+
-    '.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}.kpi{border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px}.kpi .l{color:#64748b;font-size:12px}.kpi .v{font-size:26px;font-weight:800;margin-top:2px}.kpi .s{font-size:11px;color:#64748b}'+
+    '.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.kpi{border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px}.kpi .l{color:#64748b;font-size:12px}.kpi .v{font-size:26px;font-weight:800;margin-top:2px}.kpi .s{font-size:11px;color:#64748b}'+
     '.card{border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;margin-bottom:12px;page-break-inside:avoid}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}'+
     '.ins li{margin:4px 0}.tbl{border-collapse:collapse;width:100%;font-size:12px}.tbl th,.tbl td{border:1px solid #e2e8f0;padding:5px 8px;text-align:left}.tbl th{background:#f1f5f9}.tbl .num{text-align:right}.tbl .b{font-weight:700}.mut{color:#64748b}.sum td{background:#f8fafc;font-weight:700}'+
     '.donutwrap{display:flex;align-items:center;gap:16px;flex-wrap:wrap}.leg{border-collapse:collapse;font-size:12px}.leg td{padding:3px 8px}.leg .num{text-align:right}.sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px}'+
     '.lg{display:flex;gap:14px;margin-bottom:6px;font-size:12px}.foot{margin-top:24px;color:#94a3b8;font-size:11px;border-top:1px solid #e2e8f0;padding-top:8px}'+
     '@media print{body{padding:10mm}h2{page-break-after:avoid}.pb{page-break-before:always}}@page{size:A4;margin:10mm}';
-  var legend = '<div class="lg">'+AR_OCC.map(function(k){return '<span><span class="sw" style="background:'+AR_OCC_COLOR[k]+'"></span>'+k+'</span>';}).join('')+'</div>';
+  var legend = '<div class="lg">'+occs.map(function(k){return '<span><span class="sw" style="background:'+AR_OCC_COLOR[k]+'"></span>'+k+'</span>';}).join('')+'</div>';
   var h = '<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8"><title>고객 클레임 연간 실적 리포트 '+year+'</title><style>'+css+'</style></head><body>';
-  h += '<h1>고객 클레임 연간 실적 리포트 — '+year+'년</h1><div class="sub">STKR 품질관리 · 작성일 '+today+' · 건수는 등록된 클레임의 \'건수\' 합계 기준(미입력 시 1건)</div>';
+  h += '<h1>고객 클레임 연간 실적 리포트 — '+year+'년'+(d.flt!=='전체'?' <span style="font-size:15px;color:#2563eb;">['+arFltLabel(d.flt)+']</span>':'')+'</h1><div class="sub">STKR 품질관리 · 작성일 '+today+' · 건수는 등록된 클레임의 \'건수\' 합계 기준(미입력 시 1건)</div>';
   h += '<div class="kpis">'+
-    '<div class="kpi"><div class="l">총 클레임 건수</div><div class="v">'+arFmt(d.total)+'</div><div class="s">접수 '+d.rows.length+'건'+(d.prevTotal?' · 전년 '+arFmt(d.prevTotal)+'건':'')+'</div></div>'+
-    AR_OCC.map(function(k){ return '<div class="kpi" style="border-top:3px solid '+AR_OCC_COLOR[k]+'"><div class="l">'+k+'</div><div class="v">'+arFmt(d.occ[k])+'</div><div class="s">'+arPct(d.occ[k],d.total)+'</div></div>'; }).join('')+
+    '<div class="kpi"><div class="l">총 클레임 건수'+(d.flt!=='전체'?' ('+arFltLabel(d.flt)+')':'')+'</div><div class="v">'+arFmt(d.total)+'</div><div class="s">접수 '+d.rows.length+'건'+(d.prevTotal?' · 전년 '+arFmt(d.prevTotal)+'건':'')+'</div></div>'+
+    occs.map(function(k){ return '<div class="kpi" style="border-top:3px solid '+AR_OCC_COLOR[k]+'"><div class="l">'+k+'</div><div class="v">'+arFmt(d.occ[k])+'</div><div class="s">'+arPct(d.occ[k],d.total)+'</div></div>'; }).join('')+
     '<div class="kpi"><div class="l">종결률</div><div class="v">'+arPct(d.closed,d.rows.length)+'</div><div class="s">종결 '+d.closed+' / 접수 '+d.rows.length+'건</div></div></div>';
   h += '<h2>핵심 요약</h2><div class="card"><ul class="ins" style="margin:0;padding-left:18px">'+arInsights(d).map(function(t){return '<li>'+t+'</li>';}).join('')+'</ul></div>';
   h += '<h2>월별 클레임 추이 (발생구분별)</h2><div class="card">'+legend+arVStack(monthLabels, occSeries)+'</div>';
-  h += '<div class="grid2"><div><h2>발생구분 비율</h2><div class="card">'+arDonut(AR_OCC.map(function(k){return {label:k,value:d.occ[k],color:AR_OCC_COLOR[k]};}))+'</div></div>'+
+  h += '<div class="grid2"><div><h2>발생구분 비율</h2><div class="card">'+arDonut(occs.map(function(k){return {label:k,value:d.occ[k],color:AR_OCC_COLOR[k]};}))+'</div></div>'+
        '<div><h2>부품별 건수</h2><div class="card">'+arDonut(catDonut(d.byPart))+'</div></div></div>';
   h += '<h2 class="pb">차종별 불량 현황 (발생구분별 누적, 상위 '+topModels.length+'개 차종)</h2><div class="card">'+legend+(hItems.length?arHStack(hItems):'<span class="mut">데이터 없음</span>')+'</div>';
-  h += '<h2>발생구분별 차종별 건수</h2><div class="card">'+arHeatTable(d.byModel, 20)+'</div>';
+  h += '<h2>발생구분별 차종별 건수</h2><div class="card">'+arHeatTable(d.byModel, 20, occs)+'</div>';
   h += '<h2 class="pb">클레임 현상별 현황 (파레토)</h2><div class="card">'+arPareto(d.bySymptom.map(function(x){return {label:x.key,value:x.total};}))+'<div class="mut" style="font-size:11px">막대: 건수 · 붉은 선: 누적 비율(우측 축)</div></div>';
   h += '<div class="grid2"><div><h2>심각도 분포</h2><div class="card">'+arDonut(catDonut(d.bySeverity))+'</div></div>'+
        '<div><h2>진행 상태 분포</h2><div class="card">'+arDonut(catDonut(d.byStatus))+'</div></div></div>';
@@ -3619,13 +3624,13 @@ function arBuildHtml(year){
   h += '</tbody></table><div class="foot">본 리포트는 QMS 고객 클레임 현황 데이터로 자동 생성되었습니다.</div></body></html>';
   return h;
 }
-function arExcel(year){
+function arExcel(year, flt){
   if(typeof XLSX==='undefined'){ showToast('엑셀 처리 라이브러리를 불러오지 못했습니다.'); return; }
-  var d = arData(year), wb = XLSX.utils.book_new();
-  var sum = [['고객 클레임 연간 실적 ('+year+'년)'],[],['항목','값'],['총 클레임 건수',d.total],['접수 건수',d.rows.length],['0km',d.occ['0km']],['3M',d.occ['3M']],['일반',d.occ['일반']],['전년 건수',d.prevTotal],['종결 건수',d.closed]];
+  var d = arData(year, flt), occs = d.occs, wb = XLSX.utils.book_new();
+  var sum = [['고객 클레임 연간 실적 ('+year+'년)'],[],['항목','값'],['발생구분 필터',arFltLabel(d.flt)],['총 클레임 건수',d.total],['접수 건수',d.rows.length],['0km',d.occ['0km']],['3M',d.occ['3M']],['일반',d.occ['일반']],['전년 건수',d.prevTotal],['종결 건수',d.closed]];
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sum), '요약');
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['월','0km','3M','일반','합계']].concat(d.months.map(function(m){return [m.m+'월',m['0km'],m['3M'],m['일반'],m.total];}))), '월별');
-  var mt = function(list,first){ return [[first,'0km','3M','일반','합계']].concat(list.map(function(x){return [x.key,x['0km'],x['3M'],x['일반'],x.total];})); };
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['월'].concat(occs,['합계'])].concat(d.months.map(function(m){return [m.m+'월'].concat(occs.map(function(k){return m[k];}),[m.total]);}))), '월별');
+  var mt = function(list,first){ return [[first].concat(occs,['합계'])].concat(list.map(function(x){return [x.key].concat(occs.map(function(k){return x[k];}),[x.total]);})); };
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(mt(d.byModel,'차종')), '차종×발생구분');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(mt(d.bySymptom,'현상')), '현상별');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(mt(d.byPart,'부품')), '부품별');
@@ -3633,7 +3638,7 @@ function arExcel(year){
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['사용개월 구간','건수']].concat(d.misBins.map(function(b){return [b.key,b.total];})).concat([['미입력',d.misMissing]])), '사용개월별');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['접수일','번호','고객사','차종','부품','현상','발생구분','사용개월','건수','심각도','상태']].concat(d.rows.map(function(r){return [r.date||'',r.id||'',r.customer||'',r.model||'',r.part||'',r.symptomType||'',occCategory(r.occurType),r.misMonths===undefined?'':r.misMonths,arCnt(r),r.severity||'',r.status||''];}))), '상세');
   var out = XLSX.write(wb, {bookType:'xlsx', type:'array'});
-  downloadBlobDirect(new Blob([out], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}), 'STKR_Claims_Annual_'+year+'_'+todayISO()+'.xlsx', '연간 실적 데이터(엑셀)가 다운로드되었습니다.');
+  downloadBlobDirect(new Blob([out], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}), 'STKR_Claims_Annual_'+year+(d.flt!=='전체'?'_'+d.flt.replace('+','_'):'')+'_'+todayISO()+'.xlsx', '연간 실적 데이터(엑셀)가 다운로드되었습니다.');
 }
 function openClaimsAnnualReport(){
   if(!state.claims.length){ showToast('등록된 클레임이 없습니다.'); return; }
@@ -3649,6 +3654,7 @@ function openClaimsAnnualReport(){
   layer.innerHTML = '<div style="background:var(--surface,#fff);border-radius:12px 12px 0 0;padding:10px 14px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'+
     '<b style="font-size:15px;margin-right:6px;">연간 실적 리포트</b>'+
     '<select class="filter" id="arYear">'+yl.map(function(y){return '<option value="'+y+'"'+(y===cur?' selected':'')+'>'+y+'년</option>';}).join('')+'</select>'+
+    '<select class="filter" id="arFlt" title="발생구분 필터"><option value="전체">발생구분: 전체</option><option value="0km">0km만</option><option value="3M">3M만</option><option value="0km+3M">0km + 3M (일반 제외)</option></select>'+
     '<div class="spacer" style="flex:1"></div>'+
     '<button type="button" class="btn" id="arDlHtml">HTML 다운로드</button>'+
     '<button type="button" class="btn" id="arPrint">인쇄 / PDF 저장</button>'+
@@ -3657,13 +3663,15 @@ function openClaimsAnnualReport(){
     '<iframe id="arFrame" style="flex:1;border:0;background:#fff;border-radius:0 0 12px 12px;width:100%;"></iframe>';
   document.body.appendChild(layer);
   var frame = document.getElementById('arFrame');
-  function render(){ frame.srcdoc = arBuildHtml(document.getElementById('arYear').value); }
+  function curFlt(){ return document.getElementById('arFlt').value; }
+  function render(){ frame.srcdoc = arBuildHtml(document.getElementById('arYear').value, curFlt()); }
   render();
   document.getElementById('arYear').addEventListener('change', render);
+  document.getElementById('arFlt').addEventListener('change', render);
   document.getElementById('arClose').addEventListener('click', function(){ layer.parentNode.removeChild(layer); });
-  document.getElementById('arDlHtml').addEventListener('click', function(){ var y = document.getElementById('arYear').value; downloadGeneratedFile(arBuildHtml(y), 'STKR_Claims_Annual_Report_'+y+'_'+todayISO()+'.html', '연간 실적 리포트가 다운로드되었습니다.'); });
+  document.getElementById('arDlHtml').addEventListener('click', function(){ var y = document.getElementById('arYear').value; downloadGeneratedFile(arBuildHtml(y, curFlt()), 'STKR_Claims_Annual_Report_'+y+(curFlt()!=='전체'?'_'+curFlt().replace('+','_'):'')+'_'+todayISO()+'.html', '연간 실적 리포트가 다운로드되었습니다.'); });
   document.getElementById('arPrint').addEventListener('click', function(){ try{ frame.contentWindow.focus(); frame.contentWindow.print(); }catch(e){ showToast('인쇄 창을 열 수 없습니다. HTML 다운로드 후 브라우저에서 인쇄해주세요.'); } });
-  document.getElementById('arDlXlsx').addEventListener('click', function(){ arExcel(document.getElementById('arYear').value); });
+  document.getElementById('arDlXlsx').addEventListener('click', function(){ arExcel(document.getElementById('arYear').value, curFlt()); });
 }
 
 function filteredRowsFor(modKey){
