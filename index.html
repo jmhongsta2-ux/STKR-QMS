@@ -1992,7 +1992,31 @@ var MODULES = {
       headerRowIndex:2,
       ownerHeaderDetect:true,
       matchKey:'srcKey',
-      parseRow:function(row){
+      buildIndex:function(matrix){
+        function nz(v){ return String(v===null||v===undefined?'':v).replace(/\s+/g,''); }
+        var I = {};
+        var defs = {customer:['회사','='],year:['연도','='],month:['제출월','='],model:['차종','='],powerise:['POWERISE','='],stkrPart:['STKR품번','='],customerPart:['고객품번','='],partName:['품명','='],customerContact:['고객사담당자','='],planDate:['정기검사','~'],grouping:['그룹핑','~'],sampleShip:['샘플발송','~'],germanNo:['독일성적서','~'],esTest:['ES테스트','~'],lot:['Lotno','~'],ms:['MS완료','~'],note:['비고','=']};
+        Object.keys(defs).forEach(function(k){
+          for(var r=0;r<2 && r<matrix.length;r++){
+            var row = matrix[r]||[];
+            for(var c=0;c<row.length;c++){
+              var t = nz(row[c]); if(!t) continue;
+              var tl = t.toLowerCase(), key = defs[k][0].toLowerCase();
+              if(defs[k][1]==='=' ? tl===key : tl.indexOf(key)>-1){ if(I[k]===undefined) I[k]=c; }
+            }
+          }
+        });
+        var st = matrix[1]||[];
+        for(var c2=0;c2<st.length;c2++){
+          var t2 = nz(st[c2]);
+          if(t2==='진행중' && I.inprog===undefined) I.inprog=c2;
+          else if(t2==='전산등록' && I.registered===undefined) I.registered=c2;
+          else if(t2==='완료' && I.done===undefined) I.done=c2;
+        }
+        return I;
+      },
+      parseRow:function(row, idx){
+        function G(k,d){ var v = idx ? idx[k] : undefined; return (v===undefined) ? d : v; }
         function s(v){ return (v===null||v===undefined) ? '' : String(v).trim(); }
         function toISO(v){
           if(v===null||v===undefined||v==='') return '';
@@ -2006,18 +2030,18 @@ var MODULES = {
           if(m2){ return m2[1]+'-'+('0'+m2[2]).slice(-2)+'-'+('0'+m2[3]).slice(-2); }
           return '';
         }
-        var customer = s(row[1]);
-        var year = s(row[2]);
-        var month = s(row[3]);
-        var stkrPart = s(row[6]);
-        var customerPart = s(row[7]);
-        var partName = s(row[8]);
+        var customer = s(row[G('customer',1)]);
+        var year = s(row[G('year',2)]);
+        var month = s(row[G('month',3)]);
+        var stkrPart = s(row[G('stkrPart',6)]);
+        var customerPart = s(row[G('customerPart',7)]);
+        var partName = s(row[G('partName',8)]);
         if(!stkrPart && !customerPart && !partName) return null;
-        var inProgressMark = s(row[12]);
-        var registeredMark = s(row[13]);
-        var doneMark = s(row[14]);
+        var inProgressMark = s(row[G('inprog',12)]);
+        var registeredMark = s(row[G('registered',13)]);
+        var doneMark = s(row[G('done',14)]);
         var status = '예정';
-        var note = s(row[20]);
+        var note = s(row[G('note',20)]);
         if(doneMark==='완료'){ status = '완료'; }
         else if(doneMark){ status = '불필요'; if(!note){ note = doneMark; } }
         else if(registeredMark){ status = '전산등록'; }
@@ -2027,20 +2051,20 @@ var MODULES = {
           customer: customer,
           year: year ? parseFloat(year) : '',
           month: month,
-          model: s(row[4]),
-          powerise: s(row[5]),
+          model: s(row[G('model',4)]),
+          powerise: s(row[G('powerise',5)]),
           stkrPart: stkrPart,
           customerPart: customerPart,
           partName: partName,
-          customerContact: s(row[9]),
-          planDate: toISO(row[10]),
-          grouping: s(row[11]),
+          customerContact: s(row[G('customerContact',9)]),
+          planDate: toISO(row[G('planDate',10)]),
+          grouping: s(row[G('grouping',11)]),
           status: status,
-          sampleShipDate: toISO(row[15]),
-          germanReportNo: s(row[16]),
-          esTestSchedule: s(row[17]),
-          lotNo: s(row[18]),
-          msCompleteDate: toISO(row[19]),
+          sampleShipDate: toISO(row[G('sampleShip',15)]),
+          germanReportNo: s(row[G('germanNo',16)]),
+          esTestSchedule: s(row[G('esTest',17)]),
+          lotNo: s(row[G('lot',18)]),
+          msCompleteDate: toISO(row[G('ms',19)]),
           note: note
         };
       }
@@ -4306,7 +4330,7 @@ function handleExcelImport(modKey, file){
   if(!m || !m.excelImport) return;
   if(typeof XLSX === 'undefined'){ showToast('엑셀 처리 라이브러리를 불러오지 못했습니다. 새로고침 후 다시 시도해주세요.'); return; }
   var cfg = m.excelImport;
-  var sheetCfgs = cfg.sheets && cfg.sheets.length ? cfg.sheets : [{sheetName:cfg.sheetName, headerRowIndex:cfg.headerRowIndex, parseRow:cfg.parseRow}];
+  var sheetCfgs = cfg.sheets && cfg.sheets.length ? cfg.sheets : [{sheetName:cfg.sheetName, headerRowIndex:cfg.headerRowIndex, parseRow:cfg.parseRow, buildIndex:cfg.buildIndex}];
   var reader = new FileReader();
   reader.onload = function(e){
     try{
@@ -4331,12 +4355,13 @@ function handleExcelImport(modKey, file){
             }
           }
         }
+        var colIdx = sc.buildIndex ? sc.buildIndex(matrix) : null;
+        if(colIdx && ownerCol>-1 && colIdx.note===ownerCol){ colIdx.note = -1; }
         for(var i=startIdx; i<matrix.length; i++){
           var row = matrix[i];
           if(!row) continue;
-          var parsed = sc.parseRow(row);
+          var parsed = sc.parseRow(row, colIdx);
           if(!parsed) continue;
-          if(ownerCol===20){ parsed.note = (parsed.status==='불필요') ? String(row[14]||'').trim() : ''; }
           if(ownerCol>-1){
             var ownerRaw = row[ownerCol];
             var ownerNm = (ownerRaw===null||ownerRaw===undefined) ? '' : String(ownerRaw).trim();
