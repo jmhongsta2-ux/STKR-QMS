@@ -3598,7 +3598,7 @@ function arBuildHtml(year, flt){
     '.ins li{margin:4px 0}.tbl{border-collapse:collapse;width:100%;font-size:12px}.tbl th,.tbl td{border:1px solid #e2e8f0;padding:5px 8px;text-align:left}.tbl th{background:#f1f5f9}.tbl .num{text-align:right}.tbl .b{font-weight:700}.mut{color:#64748b}.sum td{background:#f8fafc;font-weight:700}'+
     '.donutwrap{display:flex;align-items:center;gap:16px;flex-wrap:wrap}.leg{border-collapse:collapse;font-size:12px}.leg td{padding:3px 8px}.leg .num{text-align:right}.sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px}'+
     '.lg{display:flex;gap:14px;margin-bottom:6px;font-size:12px}.foot{margin-top:24px;color:#94a3b8;font-size:11px;border-top:1px solid #e2e8f0;padding-top:8px}'+
-    '@media print{body{padding:10mm}h2{page-break-after:avoid}.pb{page-break-before:always}}@page{size:A4;margin:10mm}';
+    '@media print{body{padding:10mm}h2{page-break-after:avoid}.pb{page-break-before:always}}@page{size:A4 portrait;margin:10mm}html{width:100%}';
   var legend = '<div class="lg">'+occs.map(function(k){return '<span><span class="sw" style="background:'+AR_OCC_COLOR[k]+'"></span>'+k+'</span>';}).join('')+'</div>';
   var h = '<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8"><title>고객 클레임 연간 실적 리포트 '+year+'</title><style>'+css+'</style></head><body>';
   h += '<h1>고객 클레임 연간 실적 리포트 — '+year+'년'+(d.flt!=='전체'?' <span style="font-size:15px;color:#2563eb;">['+arFltLabel(d.flt)+']</span>':'')+'</h1><div class="sub">STKR 품질관리 · 작성일 '+today+' · 건수는 등록된 클레임의 \'건수\' 합계 기준(미입력 시 1건)</div>';
