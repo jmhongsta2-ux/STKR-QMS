@@ -3397,6 +3397,275 @@ function normDateStr(d){
   return m ? m[1]+'-'+('0'+m[2]).slice(-2)+'-'+('0'+(m[3]||'1')).slice(-2) : '';
 }
 
+/* ================= 고객 클레임 연간 실적 리포트 ================= */
+var AR_PALETTE = ['#2563eb','#f59e0b','#10b981','#ef4444','#8b5cf6','#06b6d4','#ec4899','#84cc16','#f97316','#64748b'];
+var AR_OCC = ['0km','3M','일반'];
+var AR_OCC_COLOR = {'0km':'#2563eb','3M':'#f59e0b','일반':'#94a3b8'};
+function arCnt(r){ var c = parseFloat(r.count); return isNaN(c) ? 1 : c; }
+function arYearOf(r){ return normDateStr(r.date).slice(0,4); }
+function arFmt(n){ return (Math.round(n*10)/10).toLocaleString('ko-KR'); }
+function arPct(a,b){ return b ? (Math.round(a/b*1000)/10)+'%' : '-'; }
+function arTrunc(s,n){ s=String(s); return s.length>n ? s.slice(0,n-1)+'…' : s; }
+function arNiceMax(mx){
+  var steps = [1,2,3,4,5,6,8,10,12,15,20,25,30,40,50,60,80,100,120,150,200,250,300,400,500,600,800,1000,1200,1500,2000,2500,3000,4000,5000,10000,20000,50000,100000];
+  for(var k=0;k<steps.length;k++){ if(steps[k]*4>=mx) return steps[k]*4; }
+  return Math.ceil(mx/4)*4;
+}
+function arAgg(rows, keyFn){
+  var map = {}, order = [];
+  rows.forEach(function(r){
+    var k = keyFn(r);
+    if(!map[k]){ map[k] = {key:k, total:0, n:0, '0km':0, '3M':0, '일반':0}; order.push(k); }
+    var c = arCnt(r); map[k].total += c; map[k].n += 1; map[k][occCategory(r.occurType)] += c;
+  });
+  return order.map(function(k){ return map[k]; });
+}
+function arData(year){
+  var rows = state.claims.filter(function(r){ return arYearOf(r)===String(year); });
+  var prev = state.claims.filter(function(r){ return arYearOf(r)===String(year-1); });
+  var d = {year:year, rows:rows, prevRows:prev};
+  d.total = rows.reduce(function(a,r){return a+arCnt(r);},0);
+  d.prevTotal = prev.reduce(function(a,r){return a+arCnt(r);},0);
+  d.occ = {'0km':0,'3M':0,'일반':0};
+  rows.forEach(function(r){ d.occ[occCategory(r.occurType)] += arCnt(r); });
+  d.closed = rows.filter(function(r){return r.status==='종결';}).length;
+  d.months = [];
+  for(var m=1;m<=12;m++){ d.months.push({m:m, '0km':0,'3M':0,'일반':0, total:0}); }
+  rows.forEach(function(r){ var mi = parseInt(normDateStr(r.date).slice(5,7),10)-1; if(mi>=0&&mi<12){ var c=arCnt(r); d.months[mi][occCategory(r.occurType)]+=c; d.months[mi].total+=c; } });
+  var byDesc = function(a,b){ return b.total-a.total; };
+  d.byModel = arAgg(rows, function(r){ return String(r.model||'').trim() || '미기재'; }).sort(byDesc);
+  d.bySymptom = arAgg(rows, function(r){ return String(r.symptomType||'').trim() || '미분류'; }).sort(byDesc);
+  d.byPart = arAgg(rows, function(r){ return String(r.part||'').trim() || '미기재'; }).sort(byDesc);
+  d.byCustomer = arAgg(rows, function(r){ return String(r.customer||'').trim() || '미기재'; }).sort(byDesc);
+  d.bySeverity = arAgg(rows, function(r){ return String(r.severity||'').trim() || '미지정'; }).sort(byDesc);
+  d.byStatus = arAgg(rows, function(r){ return String(r.status||'').trim() || '미지정'; }).sort(byDesc);
+  var bins = [['0개월',0,0],['1~3개월',1,3],['4~6개월',4,6],['7~12개월',7,12],['13~24개월',13,24],['25~36개월',25,36],['37개월 이상',37,9999]];
+  d.misBins = bins.map(function(b){ return {key:b[0], lo:b[1], hi:b[2], total:0}; });
+  d.misMissing = 0;
+  rows.forEach(function(r){
+    var v = parseFloat(r.misMonths), c = arCnt(r);
+    if(isNaN(v)){ d.misMissing += c; return; }
+    for(var i=0;i<d.misBins.length;i++){ if(v>=d.misBins[i].lo && v<=d.misBins[i].hi){ d.misBins[i].total += c; break; } }
+  });
+  return d;
+}
+
+/* ---------- SVG 차트 ---------- */
+function arVStack(labels, series, opt){
+  opt = opt||{};
+  var W=opt.w||760, H=opt.h||260, pl=38, pr=10, pt=20, pb=30, iw=W-pl-pr, ih=H-pt-pb;
+  var tot = labels.map(function(_,i){ return series.reduce(function(a,s){return a+(s.vals[i]||0);},0); });
+  var mx = arNiceMax(Math.max.apply(null, tot.concat([1])));
+  var svg = '<svg viewBox="0 0 '+W+' '+H+'" width="100%" style="max-width:'+W+'px;font-size:11px;">';
+  for(var g=0; g<=4; g++){
+    var gy = pt + ih - ih*g/4, gv = mx*g/4;
+    svg += '<line x1="'+pl+'" x2="'+(W-pr)+'" y1="'+gy+'" y2="'+gy+'" stroke="#e2e8f0"/><text x="'+(pl-6)+'" y="'+(gy+4)+'" text-anchor="end" fill="#64748b">'+arFmt(gv)+'</text>';
+  }
+  var slot = iw/labels.length, bw = Math.min(46, slot*0.62);
+  labels.forEach(function(lb,i){
+    var x = pl + slot*i + (slot-bw)/2, y = pt+ih;
+    series.forEach(function(s){
+      var v = s.vals[i]||0; if(!v) return;
+      var h = ih*v/mx; y -= h;
+      svg += '<rect x="'+x+'" y="'+y+'" width="'+bw+'" height="'+h+'" fill="'+s.color+'" rx="1"><title>'+arEsc(lb)+' '+arEsc(s.name)+': '+arFmt(v)+'</title></rect>';
+    });
+    if(tot[i]) svg += '<text x="'+(x+bw/2)+'" y="'+(y-5)+'" text-anchor="middle" font-weight="700" fill="#0f172a">'+arFmt(tot[i])+'</text>';
+    svg += '<text x="'+(x+bw/2)+'" y="'+(H-10)+'" text-anchor="middle" fill="#475569">'+arEsc(lb)+'</text>';
+  });
+  return svg+'</svg>';
+}
+function arEsc(s){ return escHtml(String(s==null?'':s)); }
+function arHStack(items, opt){
+  opt = opt||{};
+  var rowH = 26, lblW = opt.lblW||130, W = opt.w||760, pr=46, iw = W-lblW-pr, H = items.length*rowH+8;
+  var mx = Math.max.apply(null, items.map(function(it){return it.total;}).concat([1]));
+  var svg = '<svg viewBox="0 0 '+W+' '+H+'" width="100%" style="max-width:'+W+'px;font-size:11px;">';
+  items.forEach(function(it,i){
+    var y = 4 + i*rowH, x = lblW;
+    svg += '<text x="'+(lblW-8)+'" y="'+(y+15)+'" text-anchor="end" fill="#334155">'+arEsc(arTrunc(it.label,16))+'</text>';
+    it.parts.forEach(function(p){
+      if(!p.v) return;
+      var w = iw*p.v/mx;
+      svg += '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+(rowH-8)+'" fill="'+p.color+'"><title>'+arEsc(it.label)+' '+arEsc(p.name)+': '+arFmt(p.v)+'</title></rect>';
+      if(w>20) svg += '<text x="'+(x+w/2)+'" y="'+(y+13)+'" text-anchor="middle" fill="#fff" font-size="10">'+arFmt(p.v)+'</text>';
+      x += w;
+    });
+    svg += '<text x="'+(x+5)+'" y="'+(y+14)+'" font-weight="700" fill="#0f172a">'+arFmt(it.total)+'</text>';
+  });
+  return svg+'</svg>';
+}
+function arDonut(items, opt){
+  opt = opt||{};
+  var S = opt.size||200, R = S/2-6, r = R*0.58, cx=S/2, cy=S/2;
+  var total = items.reduce(function(a,it){return a+it.value;},0);
+  var svg = '<svg viewBox="0 0 '+S+' '+S+'" width="'+S+'" height="'+S+'">';
+  if(!total){ svg += '<circle cx="'+cx+'" cy="'+cy+'" r="'+R+'" fill="#f1f5f9"/>'; }
+  else {
+    var ang = -Math.PI/2;
+    items.forEach(function(it){
+      if(!it.value) return;
+      var frac = it.value/total;
+      if(frac>=0.9999){
+        svg += '<circle cx="'+cx+'" cy="'+cy+'" r="'+R+'" fill="'+it.color+'"/>';
+      } else {
+        var a2 = ang + frac*2*Math.PI, lg = frac>0.5?1:0;
+        var x1=cx+R*Math.cos(ang), y1=cy+R*Math.sin(ang), x2=cx+R*Math.cos(a2), y2=cy+R*Math.sin(a2);
+        svg += '<path d="M'+cx+' '+cy+' L'+x1+' '+y1+' A'+R+' '+R+' 0 '+lg+' 1 '+x2+' '+y2+' Z" fill="'+it.color+'" stroke="#fff" stroke-width="1.5"><title>'+arEsc(it.label)+': '+arFmt(it.value)+' ('+arPct(it.value,total)+')</title></path>';
+        ang = a2;
+      }
+    });
+  }
+  svg += '<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="#fff"/><text x="'+cx+'" y="'+(cy-2)+'" text-anchor="middle" font-size="20" font-weight="800" fill="#0f172a">'+arFmt(total)+'</text><text x="'+cx+'" y="'+(cy+15)+'" text-anchor="middle" font-size="11" fill="#64748b">'+arEsc(opt.unit||'건')+'</text></svg>';
+  var leg = '<table class="leg">';
+  items.forEach(function(it){ leg += '<tr><td><span class="sw" style="background:'+it.color+'"></span>'+arEsc(it.label)+'</td><td class="num">'+arFmt(it.value)+'</td><td class="num mut">'+arPct(it.value,total)+'</td></tr>'; });
+  leg += '</table>';
+  return '<div class="donutwrap">'+svg+leg+'</div>';
+}
+function arPareto(items, opt){
+  opt = opt||{};
+  items = items.slice(0, opt.max||10);
+  var W=opt.w||760, H=opt.h||270, pl=38, pr=40, pt=20, pb=52, iw=W-pl-pr, ih=H-pt-pb;
+  var total = items.reduce(function(a,it){return a+it.value;},0);
+  var mx = arNiceMax(Math.max.apply(null, items.map(function(i){return i.value;}).concat([1])));
+  var svg = '<svg viewBox="0 0 '+W+' '+H+'" width="100%" style="max-width:'+W+'px;font-size:11px;">';
+  for(var g=0; g<=4; g++){
+    var gy = pt+ih-ih*g/4;
+    svg += '<line x1="'+pl+'" x2="'+(W-pr)+'" y1="'+gy+'" y2="'+gy+'" stroke="#e2e8f0"/><text x="'+(pl-6)+'" y="'+(gy+4)+'" text-anchor="end" fill="#64748b">'+arFmt(mx*g/4)+'</text><text x="'+(W-pr+6)+'" y="'+(gy+4)+'" fill="#94a3b8">'+(g*25)+'%</text>';
+  }
+  var slot = iw/Math.max(items.length,1), bw = Math.min(44, slot*0.6), cum = 0, pts = [];
+  items.forEach(function(it,i){
+    var x = pl+slot*i+(slot-bw)/2, h = ih*it.value/mx;
+    svg += '<rect x="'+x+'" y="'+(pt+ih-h)+'" width="'+bw+'" height="'+h+'" fill="'+(opt.color||'#2563eb')+'" rx="1"><title>'+arEsc(it.label)+': '+arFmt(it.value)+'</title></rect>';
+    svg += '<text x="'+(x+bw/2)+'" y="'+(pt+ih-h-5)+'" text-anchor="middle" font-weight="700" fill="#0f172a">'+arFmt(it.value)+'</text>';
+    svg += '<text x="'+(x+bw/2)+'" y="'+(pt+ih+14)+'" text-anchor="end" transform="rotate(-28 '+(x+bw/2)+' '+(pt+ih+14)+')" fill="#475569">'+arEsc(arTrunc(it.label,12))+'</text>';
+    cum += it.value; pts.push([x+bw/2, pt+ih-ih*(total?cum/total:0)]);
+  });
+  if(pts.length){
+    svg += '<polyline fill="none" stroke="#ef4444" stroke-width="2" points="'+pts.map(function(p){return p[0]+','+p[1];}).join(' ')+'"/>';
+    pts.forEach(function(p){ svg += '<circle cx="'+p[0]+'" cy="'+p[1]+'" r="3" fill="#ef4444"/>'; });
+  }
+  return svg+'</svg>';
+}
+function arHeatTable(rowsAgg, topN){
+  var list = rowsAgg.slice(0, topN||999);
+  var rest = rowsAgg.slice(topN||999);
+  if(rest.length){
+    var o = {key:'기타 차종 ('+rest.length+'종)', total:0, n:0, '0km':0,'3M':0,'일반':0};
+    rest.forEach(function(x){ o.total+=x.total; o.n+=x.n; AR_OCC.forEach(function(k){ o[k]+=x[k]; }); });
+    list = list.concat([o]);
+  }
+  var mx = Math.max.apply(null, list.map(function(x){return Math.max(x['0km'],x['3M'],x['일반']);}).concat([1]));
+  var h = '<table class="tbl"><thead><tr><th>차종</th><th class="num">0km</th><th class="num">3M</th><th class="num">일반</th><th class="num">합계</th><th class="num">비중</th></tr></thead><tbody>';
+  var gt = {'0km':0,'3M':0,'일반':0,total:0};
+  rowsAgg.forEach(function(x){ AR_OCC.forEach(function(k){ gt[k]+=x[k]; }); gt.total += x.total; });
+  list.forEach(function(x){
+    h += '<tr><td>'+arEsc(x.key)+'</td>';
+    AR_OCC.forEach(function(k){ var a = x[k]/mx; h += '<td class="num" style="'+(x[k]?'background:rgba(37,99,235,'+(0.08+a*0.42).toFixed(2)+');':'color:#cbd5e1;')+'">'+(x[k]?arFmt(x[k]):'-')+'</td>'; });
+    h += '<td class="num b">'+arFmt(x.total)+'</td><td class="num mut">'+arPct(x.total, gt.total)+'</td></tr>';
+  });
+  h += '<tr class="sum"><td>합계</td>'+AR_OCC.map(function(k){return '<td class="num">'+arFmt(gt[k])+'</td>';}).join('')+'<td class="num b">'+arFmt(gt.total)+'</td><td class="num">100%</td></tr></tbody></table>';
+  return h;
+}
+function arInsights(d){
+  var out = [];
+  if(!d.total) return ['해당 연도에 등록된 클레임이 없습니다.'];
+  out.push(d.year+'년 클레임은 총 <b>'+arFmt(d.total)+'건</b>('+d.rows.length+'건 접수)이며, 발생구분별로는 0km '+arFmt(d.occ['0km'])+'건, 3M '+arFmt(d.occ['3M'])+'건, 일반 '+arFmt(d.occ['일반'])+'건입니다.');
+  if(d.prevTotal){ var df = d.total-d.prevTotal; out.push('전년('+(d.year-1)+'년) '+arFmt(d.prevTotal)+'건 대비 <b>'+(df>0?'+':'')+arFmt(df)+'건 ('+(df>0?'+':'')+Math.round(df/d.prevTotal*1000)/10+'%)</b> '+(df>0?'증가':df<0?'감소':'동일')+'했습니다.'); }
+  var top = d.byModel[0]; if(top) out.push('불량이 가장 많은 차종은 <b>'+arEsc(top.key)+'</b>('+arFmt(top.total)+'건, 전체의 '+arPct(top.total,d.total)+')'+(d.byModel[1]?'이며, 다음은 '+arEsc(d.byModel[1].key)+'('+arFmt(d.byModel[1].total)+'건)입니다.':'입니다.'));
+  var s = d.bySymptom[0]; if(s) out.push('현상별로는 <b>'+arEsc(s.key)+'</b>이(가) '+arFmt(s.total)+'건('+arPct(s.total,d.total)+')으로 가장 많습니다.');
+  var pk = d.months.slice().sort(function(a,b){return b.total-a.total;})[0]; if(pk && pk.total) out.push('월별로는 <b>'+pk.m+'월</b>에 '+arFmt(pk.total)+'건으로 가장 많이 발생했습니다.');
+  var pt = d.byPart[0]; if(pt) out.push('부품별로는 <b>'+arEsc(pt.key)+'</b>가 '+arFmt(pt.total)+'건('+arPct(pt.total,d.total)+')으로 가장 많습니다.');
+  out.push('종결 처리된 건은 '+d.closed+'건으로 접수 건 대비 종결률은 <b>'+arPct(d.closed,d.rows.length)+'</b>입니다.');
+  return out;
+}
+function arBuildHtml(year){
+  var d = arData(year);
+  var occSeries = AR_OCC.map(function(k){ return {name:k, color:AR_OCC_COLOR[k], vals:d.months.map(function(m){return m[k];})}; });
+  var monthLabels = d.months.map(function(m){return m.m+'월';});
+  var topModels = d.byModel.slice(0,12);
+  var hItems = topModels.map(function(x){ return {label:x.key, total:x.total, parts:AR_OCC.map(function(k){return {name:k, color:AR_OCC_COLOR[k], v:x[k]};})}; });
+  var catDonut = function(list){ return list.map(function(x,i){ return {label:x.key, value:x.total, color:AR_PALETTE[i%AR_PALETTE.length]}; }); };
+  var today = todayISO();
+  var css = '*{box-sizing:border-box}body{font-family:"Malgun Gothic","Apple SD Gothic Neo",Arial,sans-serif;color:#0f172a;margin:0;padding:28px 34px;background:#fff;font-size:13px;line-height:1.5}'+
+    'h1{font-size:24px;margin:0 0 2px}h2{font-size:16px;margin:26px 0 10px;padding-left:10px;border-left:4px solid #2563eb}.sub{color:#64748b;margin-bottom:18px}'+
+    '.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}.kpi{border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px}.kpi .l{color:#64748b;font-size:12px}.kpi .v{font-size:26px;font-weight:800;margin-top:2px}.kpi .s{font-size:11px;color:#64748b}'+
+    '.card{border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;margin-bottom:12px;page-break-inside:avoid}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}'+
+    '.ins li{margin:4px 0}.tbl{border-collapse:collapse;width:100%;font-size:12px}.tbl th,.tbl td{border:1px solid #e2e8f0;padding:5px 8px;text-align:left}.tbl th{background:#f1f5f9}.tbl .num{text-align:right}.tbl .b{font-weight:700}.mut{color:#64748b}.sum td{background:#f8fafc;font-weight:700}'+
+    '.donutwrap{display:flex;align-items:center;gap:16px;flex-wrap:wrap}.leg{border-collapse:collapse;font-size:12px}.leg td{padding:3px 8px}.leg .num{text-align:right}.sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px}'+
+    '.lg{display:flex;gap:14px;margin-bottom:6px;font-size:12px}.foot{margin-top:24px;color:#94a3b8;font-size:11px;border-top:1px solid #e2e8f0;padding-top:8px}'+
+    '@media print{body{padding:10mm}h2{page-break-after:avoid}.pb{page-break-before:always}}@page{size:A4;margin:10mm}';
+  var legend = '<div class="lg">'+AR_OCC.map(function(k){return '<span><span class="sw" style="background:'+AR_OCC_COLOR[k]+'"></span>'+k+'</span>';}).join('')+'</div>';
+  var h = '<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8"><title>고객 클레임 연간 실적 리포트 '+year+'</title><style>'+css+'</style></head><body>';
+  h += '<h1>고객 클레임 연간 실적 리포트 — '+year+'년</h1><div class="sub">STKR 품질관리 · 작성일 '+today+' · 건수는 등록된 클레임의 \'건수\' 합계 기준(미입력 시 1건)</div>';
+  h += '<div class="kpis">'+
+    '<div class="kpi"><div class="l">총 클레임 건수</div><div class="v">'+arFmt(d.total)+'</div><div class="s">접수 '+d.rows.length+'건'+(d.prevTotal?' · 전년 '+arFmt(d.prevTotal)+'건':'')+'</div></div>'+
+    AR_OCC.map(function(k){ return '<div class="kpi" style="border-top:3px solid '+AR_OCC_COLOR[k]+'"><div class="l">'+k+'</div><div class="v">'+arFmt(d.occ[k])+'</div><div class="s">'+arPct(d.occ[k],d.total)+'</div></div>'; }).join('')+
+    '<div class="kpi"><div class="l">종결률</div><div class="v">'+arPct(d.closed,d.rows.length)+'</div><div class="s">종결 '+d.closed+' / 접수 '+d.rows.length+'건</div></div></div>';
+  h += '<h2>핵심 요약</h2><div class="card"><ul class="ins" style="margin:0;padding-left:18px">'+arInsights(d).map(function(t){return '<li>'+t+'</li>';}).join('')+'</ul></div>';
+  h += '<h2>월별 클레임 추이 (발생구분별)</h2><div class="card">'+legend+arVStack(monthLabels, occSeries)+'</div>';
+  h += '<div class="grid2"><div><h2>발생구분 비율</h2><div class="card">'+arDonut(AR_OCC.map(function(k){return {label:k,value:d.occ[k],color:AR_OCC_COLOR[k]};}))+'</div></div>'+
+       '<div><h2>부품별 건수</h2><div class="card">'+arDonut(catDonut(d.byPart))+'</div></div></div>';
+  h += '<h2 class="pb">차종별 불량 현황 (발생구분별 누적, 상위 '+topModels.length+'개 차종)</h2><div class="card">'+legend+(hItems.length?arHStack(hItems):'<span class="mut">데이터 없음</span>')+'</div>';
+  h += '<h2>발생구분별 차종별 건수</h2><div class="card">'+arHeatTable(d.byModel, 20)+'</div>';
+  h += '<h2 class="pb">클레임 현상별 현황 (파레토)</h2><div class="card">'+arPareto(d.bySymptom.map(function(x){return {label:x.key,value:x.total};}))+'<div class="mut" style="font-size:11px">막대: 건수 · 붉은 선: 누적 비율(우측 축)</div></div>';
+  h += '<div class="grid2"><div><h2>심각도 분포</h2><div class="card">'+arDonut(catDonut(d.bySeverity))+'</div></div>'+
+       '<div><h2>진행 상태 분포</h2><div class="card">'+arDonut(catDonut(d.byStatus))+'</div></div></div>';
+  h += '<div class="grid2"><div><h2>사용개월(MIS)별 발생 건수</h2><div class="card">'+arVStack(d.misBins.map(function(b){return b.key;}), [{name:'건수',color:'#8b5cf6',vals:d.misBins.map(function(b){return b.total;})}], {w:520,h:230})+(d.misMissing?'<div class="mut" style="font-size:11px">사용개월 미입력 '+arFmt(d.misMissing)+'건은 제외</div>':'')+'</div></div>'+
+       '<div><h2>고객사별 건수</h2><div class="card">'+arDonut(catDonut(d.byCustomer))+'</div></div></div>';
+  h += '<h2 class="pb">클레임 상세 목록 ('+d.rows.length+'건)</h2><table class="tbl"><thead><tr><th>접수일</th><th>번호</th><th>고객사</th><th>차종</th><th>부품</th><th>현상</th><th>발생구분</th><th class="num">사용개월</th><th class="num">건수</th><th>심각도</th><th>상태</th></tr></thead><tbody>';
+  d.rows.slice().sort(function(a,b){return String(a.date||'').localeCompare(String(b.date||''));}).forEach(function(r){
+    h += '<tr><td>'+arEsc(r.date||'')+'</td><td>'+arEsc(r.id||'')+'</td><td>'+arEsc(r.customer||'')+'</td><td>'+arEsc(r.model||'')+'</td><td>'+arEsc(r.part||'')+'</td><td>'+arEsc(r.symptomType||'')+'</td><td>'+arEsc(occCategory(r.occurType)==='일반' && r.occurType && r.occurType!=='일반' && r.occurType!=='기타' ? '일반('+r.occurType+')' : occCategory(r.occurType))+'</td><td class="num">'+arEsc(r.misMonths===undefined||r.misMonths===''?'':r.misMonths)+'</td><td class="num">'+arFmt(arCnt(r))+'</td><td>'+arEsc(r.severity||'')+'</td><td>'+arEsc(r.status||'')+'</td></tr>';
+  });
+  h += '</tbody></table><div class="foot">본 리포트는 QMS 고객 클레임 현황 데이터로 자동 생성되었습니다.</div></body></html>';
+  return h;
+}
+function arExcel(year){
+  if(typeof XLSX==='undefined'){ showToast('엑셀 처리 라이브러리를 불러오지 못했습니다.'); return; }
+  var d = arData(year), wb = XLSX.utils.book_new();
+  var sum = [['고객 클레임 연간 실적 ('+year+'년)'],[],['항목','값'],['총 클레임 건수',d.total],['접수 건수',d.rows.length],['0km',d.occ['0km']],['3M',d.occ['3M']],['일반',d.occ['일반']],['전년 건수',d.prevTotal],['종결 건수',d.closed]];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sum), '요약');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['월','0km','3M','일반','합계']].concat(d.months.map(function(m){return [m.m+'월',m['0km'],m['3M'],m['일반'],m.total];}))), '월별');
+  var mt = function(list,first){ return [[first,'0km','3M','일반','합계']].concat(list.map(function(x){return [x.key,x['0km'],x['3M'],x['일반'],x.total];})); };
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(mt(d.byModel,'차종')), '차종×발생구분');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(mt(d.bySymptom,'현상')), '현상별');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(mt(d.byPart,'부품')), '부품별');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(mt(d.byCustomer,'고객사')), '고객사별');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['사용개월 구간','건수']].concat(d.misBins.map(function(b){return [b.key,b.total];})).concat([['미입력',d.misMissing]])), '사용개월별');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['접수일','번호','고객사','차종','부품','현상','발생구분','사용개월','건수','심각도','상태']].concat(d.rows.map(function(r){return [r.date||'',r.id||'',r.customer||'',r.model||'',r.part||'',r.symptomType||'',occCategory(r.occurType),r.misMonths===undefined?'':r.misMonths,arCnt(r),r.severity||'',r.status||''];}))), '상세');
+  var out = XLSX.write(wb, {bookType:'xlsx', type:'array'});
+  downloadBlobDirect(new Blob([out], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}), 'STKR_Claims_Annual_'+year+'_'+todayISO()+'.xlsx', '연간 실적 데이터(엑셀)가 다운로드되었습니다.');
+}
+function openClaimsAnnualReport(){
+  if(!state.claims.length){ showToast('등록된 클레임이 없습니다.'); return; }
+  var years = {}, cy = String(new Date().getFullYear());
+  state.claims.forEach(function(r){ var y = arYearOf(r); if(y) years[y] = true; });
+  years[cy] = true;
+  var yl = Object.keys(years).sort().reverse();
+  var cur = years[cy] && state.claims.some(function(r){return arYearOf(r)===cy;}) ? cy : (yl.filter(function(y){return state.claims.some(function(r){return arYearOf(r)===y;});})[0] || cy);
+  var old = document.getElementById('claimRptLayer'); if(old) old.parentNode.removeChild(old);
+  var layer = document.createElement('div');
+  layer.id = 'claimRptLayer';
+  layer.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(15,23,42,.6);display:flex;flex-direction:column;padding:14px;';
+  layer.innerHTML = '<div style="background:var(--surface,#fff);border-radius:12px 12px 0 0;padding:10px 14px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'+
+    '<b style="font-size:15px;margin-right:6px;">연간 실적 리포트</b>'+
+    '<select class="filter" id="arYear">'+yl.map(function(y){return '<option value="'+y+'"'+(y===cur?' selected':'')+'>'+y+'년</option>';}).join('')+'</select>'+
+    '<div class="spacer" style="flex:1"></div>'+
+    '<button type="button" class="btn" id="arDlHtml">HTML 다운로드</button>'+
+    '<button type="button" class="btn" id="arPrint">인쇄 / PDF 저장</button>'+
+    '<button type="button" class="btn" id="arDlXlsx">엑셀 데이터</button>'+
+    '<button type="button" class="btn primary" id="arClose">닫기</button></div>'+
+    '<iframe id="arFrame" style="flex:1;border:0;background:#fff;border-radius:0 0 12px 12px;width:100%;"></iframe>';
+  document.body.appendChild(layer);
+  var frame = document.getElementById('arFrame');
+  function render(){ frame.srcdoc = arBuildHtml(document.getElementById('arYear').value); }
+  render();
+  document.getElementById('arYear').addEventListener('change', render);
+  document.getElementById('arClose').addEventListener('click', function(){ layer.parentNode.removeChild(layer); });
+  document.getElementById('arDlHtml').addEventListener('click', function(){ var y = document.getElementById('arYear').value; downloadGeneratedFile(arBuildHtml(y), 'STKR_Claims_Annual_Report_'+y+'_'+todayISO()+'.html', '연간 실적 리포트가 다운로드되었습니다.'); });
+  document.getElementById('arPrint').addEventListener('click', function(){ try{ frame.contentWindow.focus(); frame.contentWindow.print(); }catch(e){ showToast('인쇄 창을 열 수 없습니다. HTML 다운로드 후 브라우저에서 인쇄해주세요.'); } });
+  document.getElementById('arDlXlsx').addEventListener('click', function(){ arExcel(document.getElementById('arYear').value); });
+}
+
 function filteredRowsFor(modKey){
   var m = MODULES[modKey];
   var ui = listUIState[modKey] || {q:'', status:'전체', year:'전체', extra:'전체'};
@@ -3835,6 +4104,7 @@ function renderList(modKey, containerId, hideHeader){
     html += '<button type="button" class="btn" data-bulk-assign-mod="'+modKey+'" title="현재 목록에 표시된 항목에 담당자를 한 번에 지정합니다. 검색/상태 필터로 대상을 좁힐 수 있습니다.">'+ICONS.supplier+'<span>담당자 일괄 지정</span></button>';
   }
   if(modKey==='claims'){
+    html += '<button type="button" class="btn" id="btnClaimsAnnual" title="연도별 클레임 실적을 그래프·표로 정리한 보고서를 확인하고 내려받습니다.">'+ICONS.download+'<span>연간 실적 리포트</span></button>';
     html += '<button type="button" class="btn" id="btnClaimsReport" title="현재 등록된 전체 클레임을 첨부파일이 포함된 리포트 파일로 내려받습니다.">'+ICONS.download+'<span>리포트 다운로드</span></button>';
   }
   html += '<button class="btn primary" id="btnAddRow">'+ICONS.plus+'<span>신규 등록</span></button>';
@@ -3923,6 +4193,9 @@ function renderList(modKey, containerId, hideHeader){
     });
   }
   document.getElementById('btnAddRow').addEventListener('click', function(){ openModal(modKey, null); });
+  if(modKey==='claims' && document.getElementById('btnClaimsAnnual')){
+    document.getElementById('btnClaimsAnnual').addEventListener('click', openClaimsAnnualReport);
+  }
   if(modKey==='claims' && document.getElementById('btnClaimsReport')){
     document.getElementById('btnClaimsReport').addEventListener('click', downloadClaimsReport);
   }
